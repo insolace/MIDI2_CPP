@@ -6,124 +6,160 @@
 #include <cstring>
 
 void midi2Processor::processPESysex(uint8_t group, uint8_t s7Byte){
-	uint8_t peRequestIdx = 0;
-	
-	if(midici[group].ciType == MIDICI_PE_CAPABILITY && syExMessInt[group].pos == 13){
-		if(recvPECapabilities != nullptr)recvPECapabilities(group,midici[group], s7Byte);
-	} else
-	if(midici[group].ciType == MIDICI_PE_CAPABILITYREPLY && syExMessInt[group].pos == 13){
-        if(recvPECapabilities != nullptr)recvPECapabilitiesReplies(group,midici[group], s7Byte);
-	} else {
-        if(syExMessInt[group].pos == 13){
-            syExMessInt[group].peRequestIdx = getPERequestId(group, midici[group].remoteMUID, s7Byte);
-            if(syExMessInt[group].peRequestIdx!=255){
-                peRquestDetails[syExMessInt[group].peRequestIdx].totalChunks = 0;
-                peRquestDetails[syExMessInt[group].peRequestIdx].numChunk = 0;
-                peRquestDetails[syExMessInt[group].peRequestIdx].partialChunkCount = 1;
+
+    switch (midici[group].ciType){
+        case MIDICI_PE_CAPABILITY:
+        case MIDICI_PE_CAPABILITYREPLY:{
+            bool complete = false;
+
+            if(syExMessInt[group].pos == 13){
+                syExMessInt[group].buffer1[0] = s7Byte;
             }
 
-            return;
-        }
+            if(syExMessInt[group].pos == 13 && midici[group].ciVer == 1){
+                complete = true;
+            }
 
-        if(syExMessInt[group].pos > 13){
-            peRequestIdx=syExMessInt[group].peRequestIdx;
-            if(peRequestIdx == 255){
-                //Ignore this Get Message
+            if(syExMessInt[group].pos == 14){
+                syExMessInt[group].buffer1[1] = s7Byte;
+            }
+            if(syExMessInt[group].pos == 15){
+                syExMessInt[group].buffer1[2] = s7Byte;
+                complete = true;
+            }
+
+            if(complete){
+                if(midici[group].ciType == MIDICI_PE_CAPABILITY && recvPECapabilities != nullptr)
+                    recvPECapabilities(group,midici[group],
+                                       syExMessInt[group].buffer1[0],
+                                       syExMessInt[group].buffer1[1],
+                                       syExMessInt[group].buffer1[2]
+                                       );
+
+                if(midici[group].ciType == MIDICI_PE_CAPABILITYREPLY && recvPECapabilities != nullptr)
+                    recvPECapabilitiesReplies(group,midici[group],
+                                              syExMessInt[group].buffer1[0],
+                                              syExMessInt[group].buffer1[1],
+                                              syExMessInt[group].buffer1[2]
+                                              );
+
+            }
+
+            break;
+        }
+        default: {
+            reqId peRequestIdx;
+            if (syExMessInt[group].pos == 13) {
+                syExMessInt[group].peRequestIdx =  s7Byte;
+                peRequestIdx = std::make_tuple(group,s7Byte);
+               // peHeader newPeHead;
+                peRquestDetails[peRequestIdx] = peHeader();
                 return;
             }
-        }
 
-        if(syExMessInt[group].pos == 14 || syExMessInt[group].pos == 15){ //header Length
-            syExMessInt[group].intbuffer1[0] += s7Byte << (7 * (syExMessInt[group].pos - 14 ));
-            return;
-        }
-
-		uint16_t headerLength = syExMessInt[group].intbuffer1[0];
-		
-		if(syExMessInt[group].pos >= 16 && syExMessInt[group].pos <= 15 + headerLength){
-			processPEHeader(group, peRequestIdx, s7Byte);
-
-            if(syExMessInt[group].pos == 15 + headerLength
-                && (
-                    midici[group].ciType == MIDICI_PE_GET
-                    || midici[group].ciType == MIDICI_PE_SETREPLY
-                    || midici[group].ciType == MIDICI_PE_SUBREPLY
-                    || midici[group].ciType == MIDICI_PE_NOTIFY
-                    )
-            ){
-                if(midici[group].ciType == MIDICI_PE_GET && recvPEGetInquiry != nullptr){
-                    recvPEGetInquiry(group, midici[group], peRquestDetails[peRequestIdx]);
-                }
-                if(midici[group].ciType == MIDICI_PE_SETREPLY && recvPESetReply != nullptr){
-                    recvPESetReply(group, midici[group], peRquestDetails[peRequestIdx]);
-                }
-                if(midici[group].ciType == MIDICI_PE_SUBREPLY && recvPESubReply != nullptr){
-                    recvPESubReply(group, midici[group], peRquestDetails[peRequestIdx]);
-                }
-                if(midici[group].ciType == MIDICI_PE_NOTIFY && recvPENotify != nullptr){
-                    recvPENotify(group, midici[group], peRquestDetails[peRequestIdx]);
-                }
-                cleanupRequestId(group, midici[group].remoteMUID, peRquestDetails[peRequestIdx].requestId);
+            if (syExMessInt[group].pos > 13) {
+                peRequestIdx = std::make_tuple(group,syExMessInt[group].peRequestIdx);
+//                if (peRquestDetails.find(peRequestIdx) == 255) {
+//                    //Ignore this Get Message
+//                    return;
+//                }
             }
-            return;
+
+            if (syExMessInt[group].pos == 14 || syExMessInt[group].pos == 15) { //header Length
+                syExMessInt[group].intbuffer1[0] += s7Byte << (7 * (syExMessInt[group].pos - 14));
+                return;
+            }
+
+            uint16_t headerLength = syExMessInt[group].intbuffer1[0];
+
+            if (syExMessInt[group].pos >= 16 && syExMessInt[group].pos <= 15 + headerLength) {
+                processPEHeader(group, peRequestIdx, s7Byte);
+
+                if (syExMessInt[group].pos == 15 + headerLength
+                    && (
+                            midici[group].ciType == MIDICI_PE_GET
+                            || midici[group].ciType == MIDICI_PE_SETREPLY
+                            || midici[group].ciType == MIDICI_PE_SUBREPLY
+                            || midici[group].ciType == MIDICI_PE_NOTIFY
+                    )
+                        ) {
+                    if (midici[group].ciType == MIDICI_PE_GET && recvPEGetInquiry != nullptr) {
+                        recvPEGetInquiry(group, midici[group], peRquestDetails[peRequestIdx]);
+                    }
+                    if (midici[group].ciType == MIDICI_PE_SETREPLY && recvPESetReply != nullptr) {
+                        recvPESetReply(group, midici[group], peRquestDetails[peRequestIdx]);
+                    }
+                    if (midici[group].ciType == MIDICI_PE_SUBREPLY && recvPESubReply != nullptr) {
+                        recvPESubReply(group, midici[group], peRquestDetails[peRequestIdx]);
+                    }
+                    if (midici[group].ciType == MIDICI_PE_NOTIFY && recvPENotify != nullptr) {
+                        recvPENotify(group, midici[group], peRquestDetails[peRequestIdx]);
+                    }
+                    cleanupRequest(peRequestIdx);
+                }
+                return;
+            }
+
+            if (syExMessInt[group].pos == 16 + headerLength || syExMessInt[group].pos == 17 + headerLength) {
+                peRquestDetails[peRequestIdx].totalChunks +=
+                        s7Byte << (7 * (syExMessInt[group].pos - 16 - headerLength));
+                return;
+            }
+
+            if (syExMessInt[group].pos == 18 + headerLength || syExMessInt[group].pos == 19 + headerLength) {
+                peRquestDetails[peRequestIdx].numChunk += s7Byte << (7 * (syExMessInt[group].pos - 18 - headerLength));
+                return;
+            }
+
+            if (syExMessInt[group].pos == 20 + headerLength) { //Body Length
+                syExMessInt[group].intbuffer1[1] = s7Byte;
+                return;
+            }
+            if (syExMessInt[group].pos == 21 + headerLength) { //Body Length
+                syExMessInt[group].intbuffer1[1] += s7Byte << 7;
+            }
+
+            uint16_t bodyLength = syExMessInt[group].intbuffer1[1];
+            uint16_t initPos = 22 + headerLength;
+            uint16_t charOffset = (syExMessInt[group].pos - initPos) % S7_BUFFERLEN;
+
+            if (
+                    (syExMessInt[group].pos >= initPos && syExMessInt[group].pos <= initPos - 1 + bodyLength)
+                    || (bodyLength == 0 && syExMessInt[group].pos == initPos - 1)
+                    ) {
+                if (bodyLength != 0)syExMessInt[group].buffer1[charOffset] = s7Byte;
+
+                bool lastByteOfSet = (
+                        peRquestDetails[peRequestIdx].numChunk == peRquestDetails[peRequestIdx].totalChunks &&
+                        syExMessInt[group].pos == initPos - 1 + bodyLength);
+                bool lastByteOfChunk = (bodyLength == 0 || syExMessInt[group].pos == initPos - 1 + bodyLength);
+
+
+                if (charOffset == S7_BUFFERLEN - 1 || lastByteOfChunk) {
+                    if (midici[group].ciType == MIDICI_PE_SUB && recvPESubInquiry != nullptr) {
+                        recvPESubInquiry(group, midici[group], peRquestDetails[peRequestIdx],
+                                         charOffset + 1, syExMessInt[group].buffer1, lastByteOfChunk, lastByteOfSet);
+                    }
+
+                    if (midici[group].ciType == MIDICI_PE_SET && recvPESetInquiry != nullptr) {
+                        recvPESetInquiry(group, midici[group], peRquestDetails[peRequestIdx],
+                                         charOffset + 1, syExMessInt[group].buffer1, lastByteOfChunk, lastByteOfSet);
+                    }
+
+                    peRquestDetails[peRequestIdx].partialChunkCount++;
+                }
+
+                if (lastByteOfSet) {
+                    cleanupRequest(peRequestIdx);
+                }
+            }
+            break;
         }
-
-		if(syExMessInt[group].pos == 16 + headerLength || syExMessInt[group].pos == 17 + headerLength){
-			peRquestDetails[peRequestIdx].totalChunks += s7Byte << (7 * (syExMessInt[group].pos - 16 - headerLength ));
-            return;
-        }
-
-		if(syExMessInt[group].pos == 18 + headerLength  || syExMessInt[group].pos == 19 + headerLength){
-			peRquestDetails[peRequestIdx].numChunk += s7Byte << (7 * (syExMessInt[group].pos - 18 - headerLength ));
-            return;
-		}
-
-        if(syExMessInt[group].pos == 20 + headerLength){ //Body Length
-            syExMessInt[group].intbuffer1[1] = s7Byte;
-            return;
-        }
-		if(syExMessInt[group].pos == 21 + headerLength){ //Body Length
-			syExMessInt[group].intbuffer1[1] += s7Byte << 7;
-		}
-
-		uint16_t bodyLength = syExMessInt[group].intbuffer1[1];
-        uint16_t initPos = 22 + headerLength;
-        uint16_t charOffset = (syExMessInt[group].pos - initPos) % S7_BUFFERLEN;
-
-		if(
-			(syExMessInt[group].pos >= initPos && syExMessInt[group].pos <= initPos - 1 + bodyLength)
-			|| 	(bodyLength == 0 && syExMessInt[group].pos == initPos -1)
-		){
-			if(bodyLength != 0 )syExMessInt[group].buffer1[charOffset] = s7Byte;
-
-            bool lastByteOfSet = (peRquestDetails[peRequestIdx].numChunk == peRquestDetails[peRequestIdx].totalChunks && syExMessInt[group].pos == initPos - 1 + bodyLength);
-			bool lastByteOfChunk = (bodyLength == 0 || syExMessInt[group].pos == initPos - 1 + bodyLength);
-			
-
-			if(charOffset == S7_BUFFERLEN -1 || lastByteOfChunk){
-				if(midici[group].ciType == MIDICI_PE_SUB && recvPESubInquiry != nullptr){
-					recvPESubInquiry(group, midici[group], peRquestDetails[peRequestIdx],
-                                     charOffset+1, syExMessInt[group].buffer1, lastByteOfChunk, lastByteOfSet);
-				}
-				
-				if(midici[group].ciType == MIDICI_PE_SET && recvPESetInquiry != nullptr){
-					recvPESetInquiry(group, midici[group], peRquestDetails[peRequestIdx],
-                                     charOffset+1, syExMessInt[group].buffer1, lastByteOfChunk, lastByteOfSet);
-				}
-
-                peRquestDetails[peRequestIdx].partialChunkCount++;
-			} 
-			
-			if(lastByteOfSet){
-				cleanupRequestId(group, midici[group].remoteMUID, peRquestDetails[peRequestIdx].requestId);
-			}
-		}
-			
-	}
+    }
 	
 }
 
-void midi2Processor::processPEHeader(uint8_t group, uint8_t peRequestIdx, uint8_t s7Byte){
+void midi2Processor::processPEHeader(uint8_t group, reqId peRequestIdx, uint8_t s7Byte){
 
     /*char messStr[20];
     sprintf(messStr," p: %d %c",peRquestDetails[peRequestIdx]._headerPos, s7Byte);
@@ -204,7 +240,7 @@ void midi2Processor::processPEHeader(uint8_t group, uint8_t peRequestIdx, uint8_
 				}
 				if(!strcmp((const char*)syExMessInt[group].buffer1,"notify")){
 					peRquestDetails[peRequestIdx].command = MIDICI_PE_COMMAND_NOTIFY;
-				}
+				};
                 peRquestDetails[peRequestIdx]._headerProp=0;
                 peRquestDetails[peRequestIdx]._pvoid = nullptr;
 			}
@@ -249,7 +285,7 @@ void midi2Processor::processPEHeader(uint8_t group, uint8_t peRequestIdx, uint8_
         else if(peRquestDetails[peRequestIdx]._headerPos +1 < PE_HEAD_BUFFERLEN){
 			syExMessInt[group].buffer1[peRquestDetails[peRequestIdx]._headerPos++] = s7Byte;
         }
-	} else if((peRquestDetails[peRequestIdx]._headerState & 0xF) == PE_HEAD_STATE_IN_NUMBER) {
+	} else if((peRquestDetails[peRequestIdx]._headerState & 0xF) == PE_HEAD_STATE_IN_NUMBER) {;
 		if ((s7Byte >= '0' && s7Byte <= '9') ) {
 			int *n = (int *)peRquestDetails[peRequestIdx]._pvoid;
 			*n =  *n * 10 + (s7Byte - '0');
@@ -285,32 +321,48 @@ void midi2Processor::processPEHeader(uint8_t group, uint8_t peRequestIdx, uint8_
 //********
 
 void midi2Processor::sendPECapabilityRequest(uint8_t group, uint32_t srcMUID, uint32_t destMuid,
-                                             uint8_t numSimulRequests){
+                                             uint8_t numSimulRequests, uint8_t majVer, uint8_t minVer){
 	if(sendOutSysex == nullptr) return;
 	uint8_t sysex[14];
     MIDICI midiCiHeader;
     midiCiHeader.ciType = MIDICI_PE_CAPABILITY;
     midiCiHeader.localMUID = srcMUID;
     midiCiHeader.remoteMUID = destMuid;
+    midiCiHeader.ciVer = midiCIVer;
     createCIHeader(sysex, midiCiHeader);
 	sysex[13] = numSimulRequests;
-	sendOutSysex(group,sysex,14,0);
+    if(midiCIVer==1){
+        sendOutSysex(group,sysex,14,0);
+        return;
+    }
+	sendOutSysex(group,sysex,14,1);
+    sysex[0]=majVer;
+    sysex[1]=minVer;
+    sendOutSysex(group,sysex,2,3);
 }
 
 void midi2Processor::sendPECapabilityReply(uint8_t group, uint32_t srcMUID, uint32_t destMuid,
-                                           uint8_t numSimulRequests){
+                                           uint8_t numSimulRequests, uint8_t majVer, uint8_t minVer){
     if(sendOutSysex == nullptr) return;
     uint8_t sysex[14];
     MIDICI midiCiHeader;
     midiCiHeader.ciType = MIDICI_PE_CAPABILITYREPLY;
     midiCiHeader.localMUID = srcMUID;
     midiCiHeader.remoteMUID = destMuid;
+    midiCiHeader.ciVer = midiCIVer;
     createCIHeader(sysex, midiCiHeader);
     sysex[13] = numSimulRequests;
-    sendOutSysex(group,sysex,14,0);
+    if(midiCIVer==1){
+        sendOutSysex(group,sysex,14,0);
+        return;
+    }
+    sendOutSysex(group,sysex,14,1);
+    sysex[0]=majVer;
+    sysex[1]=minVer;
+    sendOutSysex(group,sysex,2,3);
 }
 
-//******
+	
 
 void midi2Processor::sendPEWithBody(uint8_t group, uint32_t srcMUID, uint32_t destMuid, uint8_t requestId,
                                uint16_t headerLen, uint8_t* header, uint16_t numberOfChunks, uint16_t numberOfThisChunk,
@@ -321,6 +373,7 @@ void midi2Processor::sendPEWithBody(uint8_t group, uint32_t srcMUID, uint32_t de
     midiCiHeader.ciType = ciType;
     midiCiHeader.localMUID = srcMUID;
     midiCiHeader.remoteMUID = destMuid;
+    midiCiHeader.ciVer = midiCIVer;
     createCIHeader(sysex, midiCiHeader);
     sendOutSysex(group,sysex,13,1);
 
@@ -358,21 +411,22 @@ void midi2Processor::sendPEGetReply(uint8_t group, uint32_t srcMUID, uint32_t de
                    bodyLength , body , (uint8_t) MIDICI_PE_GETREPLY);
 }
 
-//*********
+
 void midi2Processor::sendPEHeaderOnly(uint8_t group, uint32_t srcMUID, uint32_t destMuid, uint8_t requestId,
                                uint16_t headerLen, uint8_t* header, uint8_t ciType){
-    if(sendOutSysex == nullptr) return;
-    uint8_t sysex[13];
+	if(sendOutSysex == nullptr) return;
+	uint8_t sysex[13];
     MIDICI midiCiHeader;
     midiCiHeader.ciType = ciType;
     midiCiHeader.localMUID = srcMUID;
     midiCiHeader.remoteMUID = destMuid;
+    midiCiHeader.ciVer = midiCIVer;
     createCIHeader(sysex, midiCiHeader);
-    sendOutSysex(group,sysex,13,1);
-
-    sysex[0] = requestId;
-    setBytesFromNumbers(sysex, headerLen, 1, 2);
-    sendOutSysex(group,sysex,3,2);
+	sendOutSysex(group,sysex,13,1);
+	
+	sysex[0] = requestId;
+	setBytesFromNumbers(sysex, headerLen, 1, 2);
+	sendOutSysex(group,sysex,3,2);
     sendOutSysex(group, header,headerLen,2);
 
     setBytesFromNumbers(sysex, 1, 0, 2);
@@ -404,18 +458,19 @@ void midi2Processor::sendPESetReply(uint8_t group, uint32_t srcMUID, uint32_t de
 void midi2Processor::sendPEGetReplyStreamStart(uint8_t group, uint32_t srcMUID, uint32_t destMuid, uint8_t requestId,
                                                uint16_t headerLen, uint8_t* header, uint16_t numberOfChunks,
                                                uint16_t numberOfThisChunk, uint16_t bodyLength){
-    if(sendOutSysex == nullptr) return;
-    uint8_t sysex[13];
+	if(sendOutSysex == nullptr) return;
+	uint8_t sysex[13];
     MIDICI midiCiHeader;
     midiCiHeader.ciType = MIDICI_PE_GETREPLY;
     midiCiHeader.localMUID = srcMUID;
     midiCiHeader.remoteMUID = destMuid;
+    midiCiHeader.ciVer = midiCIVer;
     createCIHeader(sysex, midiCiHeader);
-    sendOutSysex(group,sysex,13,1);
-
-    sysex[0] = requestId;
-    setBytesFromNumbers(sysex, headerLen, 1, 2);
-    sendOutSysex(group,sysex,3,2);
+	sendOutSysex(group,sysex,13,1);
+	
+	sysex[0] = requestId;
+	setBytesFromNumbers(sysex, headerLen, 1, 2);
+	sendOutSysex(group,sysex,3,2);
     sendOutSysex(group, header,headerLen,2);
 
     setBytesFromNumbers(sysex, numberOfChunks, 0, 2);
@@ -429,68 +484,10 @@ void midi2Processor::sendPEGetReplyStreamContinue(uint8_t group, uint16_t partia
     sendOutSysex(group,part,partialLength, last?3:2);
 }
 
-//******
 
-uint8_t midi2Processor::getPERequestId(uint8_t group, uint32_t muid, uint8_t requestId){
-    uint8_t peRequestIdx = 255;
 
-    for(uint8_t i =0;i<numRequests;i++) {
-        if (
-                peRquestDetails[i].requestId == requestId
-                && peRquestDetails[i].muid == muid
-                && peRquestDetails[i].group == group
-                ) {
-            return i;
-        }
-    }
-    for(uint8_t i =0;i<numRequests;i++){
-        if(peRquestDetails[i].requestId == 255){
-            cleanupRequest(i);
-            peRquestDetails[i].requestId = requestId;
-            peRquestDetails[i].muid = muid;
-            peRquestDetails[i].group = group;
-            return i;
-        }
-    }
-    return peRequestIdx;
-}
-
-void midi2Processor::cleanupRequestId(uint8_t group, uint32_t muid, uint8_t requestId){
-	for(uint8_t i =0;i<numRequests;i++){
-		if(
-                peRquestDetails[i].requestId == requestId
-                && peRquestDetails[i].muid == muid
-                && peRquestDetails[i].group == group
-                ){
-            cleanupRequest(i);
-			return;
-		}
-	}
-}
-
-void midi2Processor::cleanupRequest(uint8_t reqpos){
-    peRquestDetails[reqpos].requestId = 255;
-    peRquestDetails[reqpos].group = 255;
-    peRquestDetails[reqpos].muid = M2_CI_BROADCAST;
-    memset(peRquestDetails[reqpos].resource,0,PE_HEAD_BUFFERLEN);
-    memset(peRquestDetails[reqpos].resId,0,PE_HEAD_BUFFERLEN);
-    memset(peRquestDetails[reqpos].subscribeId,0,PE_HEAD_BUFFERLEN);
-    memset(peRquestDetails[reqpos].mediaType,0,PE_HEAD_BUFFERLEN);
-    memset(peRquestDetails[reqpos].path,0,EXP_MIDICI_PE_EXPERIMENTAL_PATH);
-    peRquestDetails[reqpos].offset=-1;
-    peRquestDetails[reqpos].limit=-1;
-    peRquestDetails[reqpos].status=-1;
-    peRquestDetails[reqpos].command=0;
-    peRquestDetails[reqpos].action=0;
-    peRquestDetails[reqpos].partial=false;
-    peRquestDetails[reqpos].totalChunks=-1;
-    peRquestDetails[reqpos].numChunk=-1;
-    peRquestDetails[reqpos].partialChunkCount=1;
-    peRquestDetails[reqpos].mutualEncoding= -1;
-    peRquestDetails[reqpos]._pvoid = nullptr;
-    peRquestDetails[reqpos]._headerProp = 0;
-    peRquestDetails[reqpos]._headerPos = 0;
-    peRquestDetails[reqpos]._headerState = PE_HEAD_KEY + PE_HEAD_STATE_IN_OBJECT;
+void midi2Processor::cleanupRequest(reqId peRequestIdx){
+    peRquestDetails.erase(peRequestIdx);
 }
 
 

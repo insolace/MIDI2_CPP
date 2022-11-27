@@ -27,11 +27,13 @@
 #include "utils.h"
 #include "messageCreate.h"
 #include "bytestreamUMP.h"
+#include "UMPtoBytestream.h"
 #include "midi2Processor.h"
 #include "midi2PropertyExchange.h"
 #include "mcoded7.h"
 #include "midi2Protocol.h"
 #include "midi2Profiles.h"
+#include "midi2ProcessInquiry.h"
 
 
 

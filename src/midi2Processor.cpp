@@ -23,21 +23,12 @@
 #include <cstdlib>
 
 
-midi2Processor::midi2Processor(uint8_t numRequestsTotal){
-	#ifndef M2_DISABLE_PE
-	numRequests = numRequestsTotal;
-	peRquestDetails  = ( struct peHeader * )malloc(sizeof(peHeader) *  numRequestsTotal);
-	
-	for(uint8_t i =0;i<numRequests;i++){
-        cleanupRequest(i);
-	}
-	#endif
+midi2Processor::midi2Processor(uint8_t CIVer) {
+    midiCIVer = CIVer;
 }
 
 midi2Processor::~midi2Processor() {
-	#ifndef M2_DISABLE_PE
-	free(peRquestDetails); peRquestDetails = nullptr;
-	#endif
+
 }
 
 void midi2Processor::createCIHeader(uint8_t* sysexHeader, MIDICI midiCiHeader){
@@ -51,21 +42,16 @@ void midi2Processor::createCIHeader(uint8_t* sysexHeader, MIDICI midiCiHeader){
 }
 
 void midi2Processor::endSysex7(uint8_t group){
-    syExMessInt[group].pos = 0;
-    syExMessInt[group].realtime = 0;
-    syExMessInt[group].universalId = 0;
-    midici[group].deviceId = 255;
-    midici[group].ciType = 255;
-    midici[group].ciVer = 255;
-    midici[group].remoteMUID = 0;
-    midici[group].localMUID = 0;
-    syExMessInt[group].peRequestIdx = 255;
-    memset(syExMessInt[group].buffer1, 0, sizeof(syExMessInt[group].buffer1));
-    memset(syExMessInt[group].intbuffer1, 0, sizeof(syExMessInt[group].intbuffer1));
+
+    midici.erase(group);
+    syExMessInt.erase(group);
 }
 
 void midi2Processor::startSysex7(uint8_t group){
-    syExMessInt[group].pos = 0;
+    //MIDICI newMidiCI;
+    //umpSysex7Internal newSInt;
+    midici[group] =  MIDICI();
+    syExMessInt[group] = umpSysex7Internal();
 }
 
 void midi2Processor::processSysEx(uint8_t group, uint8_t s7Byte){
@@ -235,6 +221,7 @@ void midi2Processor::processSysEx(uint8_t group, uint8_t s7Byte){
 }
 
 void midi2Processor::processMIDICI(uint8_t group, uint8_t s7Byte){
+    //printf("s7 Byte %d\n", s7Byte);
 	if(syExMessInt[group].pos == 3){
 		midici[group].ciType =  s7Byte;
 	}
@@ -260,7 +247,8 @@ void midi2Processor::processMIDICI(uint8_t group, uint8_t s7Byte){
 	//break up each Process based on ciType
     if(syExMessInt[group].pos >= 12) {
         switch (midici[group].ciType) {
-            case MIDICI_DISCOVERY: //Discovery Request
+            case MIDICI_DISCOVERYREPLY: //Discovery Reply
+            case MIDICI_DISCOVERY: { //Discovery Request
                 if (syExMessInt[group].pos >= 13 && syExMessInt[group].pos <= 23) {
                     syExMessInt[group].buffer1[syExMessInt[group].pos - 13] = s7Byte;
                 }
@@ -270,60 +258,70 @@ void midi2Processor::processMIDICI(uint8_t group, uint8_t s7Byte){
                 if (syExMessInt[group].pos >= 25 && syExMessInt[group].pos <= 28) {
                     syExMessInt[group].intbuffer1[1] += s7Byte << (7 * (syExMessInt[group].pos - 25)); //maxSysEx
                 }
-                if (syExMessInt[group].pos == 28) {
-                    //debug("  - Discovery Request 28 ");
-                    if (recvDiscoveryRequest != nullptr) {
-                        uint8_t manuIdR[3] = {syExMessInt[group].buffer1[0], syExMessInt[group].buffer1[1],
-                                              syExMessInt[group].buffer1[2]};
-                        uint8_t famIdR[2] = {syExMessInt[group].buffer1[3], syExMessInt[group].buffer1[4]};
-                        uint8_t modelIdR[2] = {syExMessInt[group].buffer1[5], syExMessInt[group].buffer1[6]};
-                        uint8_t verR[4] = {syExMessInt[group].buffer1[7], syExMessInt[group].buffer1[8],
-                                           syExMessInt[group].buffer1[9], syExMessInt[group].buffer1[10]};
-                        recvDiscoveryRequest(
-                                group,
-                                midici[group],
-                                manuIdR,
-                                famIdR,
-                                modelIdR,
-                                verR,
-                                syExMessInt[group].intbuffer1[0],
-                                syExMessInt[group].intbuffer1[1]
-                        );
+
+                bool complete = false;
+                if (syExMessInt[group].pos == 28 && midici[group].ciVer == 1) {
+                    complete = true;
+                }
+                else if (syExMessInt[group].pos == 28){
+                    syExMessInt[group].intbuffer1[2] = s7Byte; //output path id
+                    if(midici[group].ciType==MIDICI_DISCOVERY) {
+                        complete = true;
+                    }
+                }
+                else if (syExMessInt[group].pos == 29){
+                    syExMessInt[group].intbuffer1[3] = s7Byte; //fbIdx id
+                    if(midici[group].ciType==MIDICI_DISCOVERYREPLY) {
+                        complete = true;
                     }
                 }
 
-                break;
-            case MIDICI_DISCOVERYREPLY: //Discovery Reply'
-                if (syExMessInt[group].pos >= 13 && syExMessInt[group].pos <= 23) {
-                    syExMessInt[group].buffer1[syExMessInt[group].pos - 13] = s7Byte;
-                }
-                if (syExMessInt[group].pos == 24) {
-                    syExMessInt[group].intbuffer1[0] = s7Byte; // ciSupport
-                }
-                if (syExMessInt[group].pos >= 25 && syExMessInt[group].pos <= 28) {
-                    syExMessInt[group].intbuffer1[1] += s7Byte << (7 * (syExMessInt[group].pos - 25)); //maxSysEx
-                }
-                if (syExMessInt[group].pos == 28) {
-                    if (recvDiscoveryReply != nullptr) {
-                        uint8_t manuIdR[3] = {syExMessInt[group].buffer1[0], syExMessInt[group].buffer1[1],
-                                              syExMessInt[group].buffer1[2]};
-                        uint8_t famIdR[2] = {syExMessInt[group].buffer1[3], syExMessInt[group].buffer1[4]};
-                        uint8_t modelIdR[2] = {syExMessInt[group].buffer1[5], syExMessInt[group].buffer1[6]};
-                        uint8_t verR[4] = {syExMessInt[group].buffer1[7], syExMessInt[group].buffer1[8],
-                                           syExMessInt[group].buffer1[9], syExMessInt[group].buffer1[10]};
-                        recvDiscoveryReply(
+                /*else if (syExMessInt[group].pos == 29){
+                    syExMessInt[group].intbuffer1[3] = s7Byte; //product id Length
+                }else if (syExMessInt[group].pos >= 30 && syExMessInt[group].pos <= 30+syExMessInt[group].intbuffer1[3]){
+                    syExMessInt[group].buffer1[syExMessInt[group].pos - 30 + 11] = s7Byte; //product ID
+                }*/
+//                if (syExMessInt[group].pos == 30 + syExMessInt[group].intbuffer1[3]){
+//                    complete = true;
+//                }
+
+                if (complete) {
+                    //debug("  - Discovery Request 28 ");
+
+                    if(midici[group].ciType==MIDICI_DISCOVERY) {
+                        if (recvDiscoveryRequest != nullptr) recvDiscoveryRequest(
                                 group,
                                 midici[group],
-                                manuIdR,
-                                famIdR,
-                                modelIdR,
-                                verR,
+                                {syExMessInt[group].buffer1[0],syExMessInt[group].buffer1[1],syExMessInt[group].buffer1[2]},
+                                {syExMessInt[group].buffer1[3], syExMessInt[group].buffer1[4]},
+                                {syExMessInt[group].buffer1[5], syExMessInt[group].buffer1[6]},
+                                {syExMessInt[group].buffer1[7], syExMessInt[group].buffer1[8],
+                                 syExMessInt[group].buffer1[9], syExMessInt[group].buffer1[10]},
                                 syExMessInt[group].intbuffer1[0],
-                                syExMessInt[group].intbuffer1[1]
+                                syExMessInt[group].intbuffer1[1],
+                                syExMessInt[group].intbuffer1[2]
+                                //syExMessInt[group].intbuffer1[3],
+                               // &(syExMessInt[group].buffer1[11])
+                        );
+                    }else{
+                        if (recvDiscoveryReply != nullptr) recvDiscoveryReply(
+                                group,
+                                midici[group],
+                                {syExMessInt[group].buffer1[0],syExMessInt[group].buffer1[1],syExMessInt[group].buffer1[2]},
+                                {syExMessInt[group].buffer1[3], syExMessInt[group].buffer1[4]},
+                                {syExMessInt[group].buffer1[5], syExMessInt[group].buffer1[6]},
+                                {syExMessInt[group].buffer1[7], syExMessInt[group].buffer1[8],
+                                 syExMessInt[group].buffer1[9], syExMessInt[group].buffer1[10]},
+                                syExMessInt[group].intbuffer1[0],
+                                syExMessInt[group].intbuffer1[1],
+                                syExMessInt[group].intbuffer1[2],
+                                syExMessInt[group].intbuffer1[3]
+                                //&(syExMessInt[group].buffer1[11])
                         );
                     }
                 }
                 break;
+            }
 
             case MIDICI_INVALIDATEMUID: //MIDI-CI Invalidate MUID Message
 
@@ -340,13 +338,105 @@ void midi2Processor::processMIDICI(uint8_t group, uint8_t s7Byte){
                     recvInvalidateMUID(group, midici[group], terminateMUID);
                 }
                 break;
-            case MIDICI_NAK: //MIDI-CI NAK
-                if (recvNAK != nullptr) {
-                    recvNAK(group, midici[group]);
+            case MIDICI_ENDPOINTINFO:{
+                if (syExMessInt[group].pos == 13 && midici[group].ciVer > 1 && recvEndPointInfo!= nullptr) {
+                    recvEndPointInfo(group, midici[group],s7Byte); // uint8_t origSubID,
                 }
                 break;
+            }
+            case MIDICI_ENDPOINTINFO_REPLY:{
+                bool complete = false;
+                if(midici[group].ciVer < 2) return;
+                if (syExMessInt[group].pos == 13 && recvEndPointInfo!= nullptr) {
+                    syExMessInt[group].intbuffer1[0] = s7Byte;
+                }
+                if(syExMessInt[group].pos == 14 || syExMessInt[group].pos == 15){
+                    syExMessInt[group].intbuffer1[1] += s7Byte << (7 * (syExMessInt[group].pos - 14 ));
+                    return;
+                }
+                if (syExMessInt[group].pos >= 16 && syExMessInt[group].pos <= 15 + syExMessInt[group].intbuffer1[1]){
+                    syExMessInt[group].buffer1[syExMessInt[group].pos - 16] = s7Byte; //Info Data
+                }if (syExMessInt[group].pos == 16 + syExMessInt[group].intbuffer1[1]){
+                    complete = true;
+                }
 
-#ifndef M2_DISABLE_PROTOCOL
+                if (complete) {
+                    recvEndPointInfoReply(group, midici[group],
+                                     syExMessInt[group].intbuffer1[0],
+                                     syExMessInt[group].intbuffer1[1],
+                                     syExMessInt[group].buffer1
+                                     );
+                }
+                break;
+            }
+            case MIDICI_ACK:
+            case MIDICI_NAK: {
+                bool complete = false;
+
+                if (syExMessInt[group].pos == 13 && midici[group].ciVer == 1) {
+                    complete = true;
+                } else if (syExMessInt[group].pos == 13 && midici[group].ciVer > 1) {
+                    syExMessInt[group].intbuffer1[0] = s7Byte; // uint8_t origSubID,
+                }
+
+                if (syExMessInt[group].pos == 14) {
+                    syExMessInt[group].intbuffer1[1] = s7Byte; //statusCode
+                }
+
+                if (syExMessInt[group].pos == 15) {
+                    syExMessInt[group].intbuffer1[2] = s7Byte; //statusData
+                }
+
+                if (syExMessInt[group].pos >= 16 && syExMessInt[group].pos <= 20){
+                    syExMessInt[group].buffer1[syExMessInt[group].pos - 16] = s7Byte; //ackNakDetails
+                }
+
+                if(syExMessInt[group].pos == 21 || syExMessInt[group].pos == 22){
+                    syExMessInt[group].intbuffer1[3] += s7Byte << (7 * (syExMessInt[group].pos - 21 ));
+                    return;
+                }
+
+                if (syExMessInt[group].pos >= 23 && syExMessInt[group].pos <= 23 + syExMessInt[group].intbuffer1[3]){
+                    syExMessInt[group].buffer1[syExMessInt[group].pos - 23] = s7Byte; //product ID
+                }
+                if (syExMessInt[group].pos == 23 + syExMessInt[group].intbuffer1[3]){
+                    complete = true;
+                }
+
+                if (complete) {
+                    uint8_t ackNakDetails[5] = {syExMessInt[group].buffer1[0], syExMessInt[group].buffer1[1],
+                                                syExMessInt[group].buffer1[2],
+                                                syExMessInt[group].buffer1[3],
+                                                syExMessInt[group].buffer1[4]};
+
+                    if (midici[group].ciType == MIDICI_NAK && recvNAK != nullptr)
+                        recvNAK(
+                            group,
+                            midici[group],
+                            syExMessInt[group].intbuffer1[0],
+                            syExMessInt[group].intbuffer1[1],
+                            syExMessInt[group].intbuffer1[2],
+                            ackNakDetails,
+                            syExMessInt[group].intbuffer1[3],
+                            syExMessInt[group].buffer1
+                    );
+
+                    if (midici[group].ciType == MIDICI_ACK && midici[group].ciVer > 1 && recvACK != nullptr)
+                        recvACK(
+                            group,
+                            midici[group],
+                            syExMessInt[group].intbuffer1[0],
+                            syExMessInt[group].intbuffer1[1],
+                            syExMessInt[group].intbuffer1[2],
+                            ackNakDetails,
+                            syExMessInt[group].intbuffer1[3],
+                            syExMessInt[group].buffer1
+                        );
+                }
+                break;
+            }
+
+#ifdef M2_ENABLE_PROTOCOL
             case MIDICI_PROTOCOL_NEGOTIATION:
             case MIDICI_PROTOCOL_NEGOTIATION_REPLY:
             case MIDICI_PROTOCOL_SET:
@@ -384,6 +474,15 @@ void midi2Processor::processMIDICI(uint8_t group, uint8_t s7Byte){
                 break;
 #endif
 
+#ifndef M2_DISABLE_PROCESSINQUIRY
+            case MIDICI_PI_CAPABILITY:
+            case MIDICI_PI_CAPABILITYREPLY:
+            case MIDICI_PI_MM_REPORT:
+            case MIDICI_PI_MM_REPORT_REPLY:
+            case MIDICI_PI_MM_REPORT_END:
+                processPISysex(group, s7Byte);
+                break;
+#endif
             default:
                 if (recvUnknownMIDICI) {
                     recvUnknownMIDICI(group, &syExMessInt[group], midici[group], s7Byte);
@@ -392,6 +491,14 @@ void midi2Processor::processMIDICI(uint8_t group, uint8_t s7Byte){
 
         }
     }
+}
+
+void midi2Processor::clearUMP(){
+    messPos = 0;
+    umpMess[0]=0;
+    umpMess[1]=0;
+    umpMess[2]=0;
+    umpMess[3]=0;
 }
 
 void midi2Processor::processUMP(uint32_t UMP){
@@ -407,24 +514,26 @@ void midi2Processor::processUMP(uint32_t UMP){
 
 		if(mt == UMP_UTILITY){ //32 bits Utility Messages
 			uint8_t status = (umpMess[0] >> 20) & 0xF;
-			
-			#ifndef M2_DISABLE_JR
 			uint16_t timing = (umpMess[0] >> 16) & 0xFFFF;
-			#endif
 			
 			switch(status){
-				case 0: // NOOP 
-				//if(group== 0 && noop != 0) noop();
+				case UTILITY_NOOP: // NOOP
+				//if(group== 0 && noop != nullptr) noop();
 				break;
-			#ifndef M2_DISABLE_JR	
-				case 0b1: // JR Clock Message 
-					if(recvJRClock != nullptr) recvJRClock(group, timing);
+				case UTILITY_JRCLOCK: // JR Clock Message
+					if(recvJRClock != nullptr) recvJRClock(/*group, */timing);
 					break;
-				case 0b10: //JR Timestamp Message
-					//??? Message out or attach to next message?
-					if(recvJRTimeStamp != nullptr) recvJRTimeStamp(group, timing);
+				case UTILITY_JRTS: //JR Timestamp Message
+					if(recvJRTimeStamp != nullptr) recvJRTimeStamp(/*group, */timing);
 					break;
-			#endif
+				case UTILITY_PROTOCOL_REQUEST: //JR Protocol Req
+				    if(recvJRProtocolReq != nullptr) recvJRProtocolReq(/*group, */(umpMess[0] >> 2) & 1,
+				                                   (umpMess[0] >> 1) & 1, umpMess[0] & 1);
+				    break;
+				case UTILITY_PROTOCOL_NOTIFY: //JR Protocol Req
+				    if(recvJRProtocolNotify != nullptr) recvJRProtocolNotify(/*group, */(umpMess[0] >> 2) & 1,
+				                                                                  (umpMess[0] >> 1) & 1, umpMess[0] & 1);
+				    break;
 			}
 			
 		} else 
@@ -451,25 +560,25 @@ void midi2Processor::processUMP(uint32_t UMP){
 				}
 				break;
 				case TUNEREQUEST:
-				if(tuneRequest != nullptr) tuneRequest(group);
+				    if(tuneRequest != nullptr) tuneRequest(group);
 				break;
 				case TIMINGCLOCK:
-				if(timingClock != nullptr) timingClock(group);
+				    if(timingClock != nullptr) timingClock(group);
 				break;
 				case SEQSTART:
-				if(seqStart != nullptr) seqStart(group);
+				    if(seqStart != nullptr) seqStart(group);
 				break;
 				case SEQCONT:
-				if(seqCont != nullptr) seqCont(group);
+				    if(seqCont != nullptr) seqCont(group);
 				break;
 				case SEQSTOP:
-				if(seqStop != nullptr) seqStop(group);
+				    if(seqStop != nullptr) seqStop(group);
 				break;
 				case ACTIVESENSE:
-				if(activeSense != nullptr) activeSense(group);
+				    if(activeSense != nullptr) activeSense(group);
 				break;
 				case SYSTEMRESET:
-				if(systemReset != nullptr) systemReset(group);
+				    if(systemReset != nullptr) systemReset(group);
 				break;
 			}
 		
@@ -563,7 +672,7 @@ void midi2Processor::processUMP(uint32_t UMP){
 				
 				case RPN_RELATIVE: //Relative RPN
 					if(rrpn != nullptr) rrpn(group, channel, val1, val2, (int32_t)umpMess[1]/*twoscomplement*/);
-					break;
+					break;	
 
 				case NRPN_RELATIVE: //Relative NRPN
 					if(rnrpn != nullptr) rnrpn(group, channel, val1, val2, (int32_t)umpMess[1]/*twoscomplement*/);
@@ -587,9 +696,9 @@ void midi2Processor::processUMP(uint32_t UMP){
 
 				case NRPN_PERNOTE: //Assignable Per-Note Controller 1
                     if(nrpnPerNote != nullptr) nrpnPerNote(group, channel, val1, val2, umpMess[1]);
-					break;
+					break;	
 					
-				case RPN_PERNOTE: //Registered Per-Note Controller 0
+				case RPN_PERNOTE: //Registered Per-Note Controller 0 
                     if(rpnPerNote != nullptr) rpnPerNote(group, channel, val1, val2, umpMess[1]);
 					break;	
 					
@@ -600,7 +709,7 @@ void midi2Processor::processUMP(uint32_t UMP){
 			}
 		}
         messPos =0;
-	}else
+	}else		
     if(messPos == 2
        && (mt == 0xB || mt == 0xC)
             ){ //96bit Messages
@@ -609,6 +718,85 @@ void midi2Processor::processUMP(uint32_t UMP){
     if(messPos == 3
              && (mt == UMP_DATA || mt >= 0xD)
     ){ //128bit Messages
+
+        if(mt == UMP_MIDI_ENDPOINT) { //128 bits UMP Stream Messages
+            uint16_t status = (umpMess[0] >> 16) & 0x3FF;
+            uint8_t form = umpMess[0] >> 24 & 0x3;
+
+
+            switch(status) {
+                case MIDIENDPOINT: {
+                    uint8_t filter = umpMess[1] & 0xFF;
+                    if (midiEndpoint != nullptr) midiEndpoint(filter);
+                    break;
+                }
+                case MIDIENDPOINT_INFO_NOTIFICATION:
+                    //TODO Add this handler
+                    break;
+                case MIDIENDPOINT_DEVICEINFO_NOTIFICATION:
+                    if(midiEndpointDeviceInfo != nullptr) {
+
+                        // these have to be explicitly cast as (uint8_t) or it will cause an error in some compilers
+                        std::array<uint8_t, 3> manuId = {
+                            (uint8_t)((umpMess[1] >> 16) & 0x7F),
+                            (uint8_t)((umpMess[1] >> 8) & 0x7F),
+                            (uint8_t)(umpMess[1] & 0x7F) };
+
+                        std::array<uint8_t, 2> familyId = {
+                            (uint8_t)((umpMess[2] >> 24) & 0x7F),
+                            (uint8_t)((umpMess[2] >> 16) & 0x7F)
+                        };
+
+                        std::array<uint8_t, 2> modelId = {
+                            (uint8_t)((umpMess[2] >> 8) & 0x7F),
+                            (uint8_t)(umpMess[2] & 0x7F)
+                        };
+
+                        std::array<uint8_t, 4> version = {
+                            (uint8_t)((umpMess[3] >> 24) & 0x7F),
+                            (uint8_t)((umpMess[3] >> 16) & 0x7F),
+                            (uint8_t)((umpMess[3] >> 8) & 0x7F),
+                            (uint8_t)(umpMess[3] & 0x7F)
+                        };
+
+                        midiEndpointDeviceInfo(manuId, familyId, modelId, version);
+                    }
+                    break;
+                case MIDIENDPOINT_NAME_NOTIFICATION:
+                case MIDIENDPOINT_PRODID_NOTIFICATION:
+                    //TODO Add this handler
+                    //if(midiEndpointName != nullptr) midiEndpointName(form,0,"");
+                    //if(midiEndpointProdId != nullptr) midiEndpointProdId(form,0,"");
+                    break;
+                case FUNCTIONBLOCK:{
+                    uint8_t filter = umpMess[0] & 0xFF;
+                    uint8_t fbIdx = (umpMess[0] >> 8) & 0xFF;
+                    if(functionBlock != nullptr) functionBlock(fbIdx, filter);
+                    break;
+                }
+
+                case FUNCTIONBLOCK_INFO_NOTFICATION:
+                    if(functionBlockInfo != nullptr) {
+                        uint8_t fbIdx = (umpMess[0] >> 8) & 0x7F;
+                        functionBlockInfo(
+                                fbIdx, //fbIdx
+                                (umpMess[0] >> 15) & 0x1, // active
+                                umpMess[0] & 0x3, //dir
+                                ((umpMess[1] >> 24) & 0x1F), //first group
+                                ((umpMess[1] >> 16) & 0x1F), // group length
+                                (umpMess[1] >> 15) & 0x1, // midiCIValid
+                                ((umpMess[1] >> 8) & 0x7F), //midiCIVersion
+                                ((umpMess[0]>>2)  & 0x3), //isMIDI 1
+                                (umpMess[1]  & 0xFF) // max Streams
+                        );
+                    }
+                    break;
+                case FUNCTIONBLOCK_NAME_NOTIFICATION:
+                    //if(functionBlockName != nullptr) functionBlockName(fbIdx, form,0,"");
+                    break;
+            }
+
+        }else
         if(mt == UMP_DATA){ //128 bits Data Messages (including System Exclusive 8)
             uint8_t status = (umpMess[0] >> 20) & 0xF;
             //SysEx 8
@@ -659,79 +847,269 @@ void midi2Processor::processUMP(uint32_t UMP){
             }
 
         }
-        messPos =0;
-    } else {
+        else
+        if(mt == UMP_FLEX_DATA){ //128 bits Data Messages (including System Exclusive 8)
+            uint8_t statusBank = (umpMess[0] >> 8) & 0xFF;
+            uint8_t status = umpMess[0] & 0xFF;
+            uint8_t channel = (umpMess[0] >> 16) & 0xF;
+            uint8_t addrs = (umpMess[0] >> 18) & 0b11;
+            uint8_t form = (umpMess[0] >> 20) & 0b11;
+            //SysEx 8
+            switch (statusBank){
+                case FLEXDATA_COMMON:{ //Common/Configuration for MIDI File, Project, and Track
+                    switch (status){
+                        case FLEXDATA_COMMON_TEMPO: { //Set Tempo Message
+                            if(flexTempo != nullptr) flexTempo(group, umpMess[1]);
+                            break;
+                        }
+                        case FLEXDATA_COMMON_TIMESIG: { //Set Time Signature Message
+                            if(flexTimeSig != nullptr) flexTimeSig(group,
+                                                                 (umpMess[1] >> 24) & 0xFF,
+                                                                 (umpMess[1] >> 16) & 0xFF,
+                                                                 (umpMess[1] >> 8) & 0xFF
+                                   );
+                            break;
+                        }
+                        case FLEXDATA_COMMON_METRONOME: { //Set Metronome Message
+                            if(flexMetronome != nullptr) flexMetronome(group,
+                                                                   (umpMess[1] >> 24) & 0xFF,
+                                                                   (umpMess[1] >> 16) & 0xFF,
+                                                                   (umpMess[1] >> 8) & 0xFF,
+                                                                   umpMess[1] & 0xFF,
+                                                                   (umpMess[2] >> 24) & 0xFF,
+                                                                   (umpMess[2] >> 16) & 0xFF
+                                );
+                            break;
+                        }
+                        case FLEXDATA_COMMON_KEYSIG: { //Set Key Signature Message
+                            if(flexKeySig != nullptr) flexKeySig(group, addrs, channel,
+                                                                   (umpMess[1] >> 24) & 0xFF,
+                                                                   (umpMess[1] >> 16) & 0xFF
+                                );
+                            break;
+                        }
+                        case FLEXDATA_COMMON_CHORD: { //Set Chord Message
+                            if(flexChord != nullptr) flexChord(group, addrs, channel,
+                                                                       (umpMess[1] >> 28) & 0xF, //chShrpFlt
+                                                                       (umpMess[1] >> 24) & 0xF, //chTonic
+                                                                       (umpMess[1] >> 16) & 0xFF, //chType
+                                                                       (umpMess[1] >> 12) & 0xF, //chAlt1Type
+                                                                       (umpMess[1] >> 8) & 0xF,//chAlt1Deg
+                                                                       (umpMess[1] >> 4) & 0xF,//chAlt2Type
+                                                                       umpMess[1] & 0xF,//chAlt2Deg
+                                                                       (umpMess[2] >> 28) & 0xF,//chAlt3Type
+                                                                       (umpMess[2] >> 24) & 0xF,//chAlt3Deg
+                                                                       (umpMess[2] >> 20) & 0xF,//chAlt4Type
+                                                                       (umpMess[2] >> 16) & 0xF,//chAlt4Deg
+                                                                       (umpMess[3] >> 28) & 0xF,//baShrpFlt
+                                                                    (umpMess[3] >> 24) & 0xF,//baTonic
+                                                                (umpMess[3] >> 16) & 0xFF,//baType
+                                                               (umpMess[3] >> 12) & 0xF,//baAlt1Type
+                                                               (umpMess[3] >> 8) & 0xF,//baAlt1Deg
+                                                               (umpMess[3] >> 4) & 0xF,//baAlt2Type
+                                                               umpMess[1] & 0xF//baAlt2Deg
+                                );
+                            break;
+                        }
+                    }
+                    break;
+                }
+                case FLEXDATA_PERFORMANCE: //Performance Events
+                case FLEXDATA_LYRIC:{ //Lyric Events
+                    uint8_t textLength = 0;
+                    uint8_t text[12];
+                    for(uint8_t i = 1; i<=3; i++){
+                        for(uint8_t j = 24; j>=0; j=j-8){
+                            uint8_t c = (umpMess[i] >> j) & 0xFF;
+                            if(c){
+                                text[textLength++]=c;
+                            }
+                        }
+                    }
+                    if(statusBank== FLEXDATA_LYRIC && flexLyric != nullptr) flexLyric(group, form, addrs, channel, status, text, textLength);
+                    if(statusBank== FLEXDATA_PERFORMANCE && flexPerformance != nullptr) flexPerformance(group, form, addrs, channel, status, text, textLength);
+                    break;
+
+                }
+            }
+
+        }
+		messPos =0;
+	} else {
 		messPos++;
 	}
 	
 }
 
-void midi2Processor::sendDiscoveryRequest(uint8_t group, uint32_t srcMUID,
-                                          uint8_t* sysexId, uint8_t* famId,
-                                          uint8_t* modelId, uint8_t* ver,
-                                          uint8_t ciSupport, uint16_t sysExMax
+void midi2Processor::sendDiscovery(uint8_t ciType, uint8_t group, uint32_t srcMUID, uint32_t destMUID,
+                                   std::array<uint8_t, 3> manuId, std::array<uint8_t, 2> familyId,
+                                   std::array<uint8_t, 2> modelId, std::array<uint8_t, 4> version,
+                                          uint8_t ciSupport, uint16_t sysExMax,
+                                          uint8_t outputPathId,
+                                            uint8_t fbIdx
+                                          //uint8_t productInstanceIdLength, uint8_t* productInstanceId
                    ){
 	if(sendOutSysex == nullptr) return;
 	
 	uint8_t sysex[13];
     MIDICI midiCiHeader;
-    midiCiHeader.ciType = MIDICI_DISCOVERY;
+    midiCiHeader.ciType = ciType;
     midiCiHeader.localMUID = srcMUID;
+    midiCiHeader.remoteMUID = destMUID;
+    midiCiHeader.ciVer = midiCIVer;
     createCIHeader(sysex, midiCiHeader);
 	sendOutSysex(group,sysex,13,1);
-	sendOutSysex(group,sysexId,3,2);
-	sendOutSysex(group,famId,2,2);
-	sendOutSysex(group,modelId,2,2);
-	sendOutSysex(group,ver,4,2);
-	
+
+
+    sysex[0] = manuId[0];
+    sysex[1] = manuId[1];
+    sysex[2] = manuId[2];
+    sysex[3] = familyId[0];
+    sysex[4] = familyId[1];
+    sysex[5] = modelId[0];
+    sysex[6] = modelId[1];
+    sysex[7] = version[0];
+    sysex[8] = version[1];
+    sysex[9] = version[2];
+    sysex[10] = version[3];
+	sendOutSysex(group,sysex,11,2);
 	//Capabilities
 	sysex[0]=ciSupport;
 	setBytesFromNumbers(sysex, sysExMax, 1, 4);
-	sendOutSysex(group,sysex,5,3);
+    if(midiCIVer<2){
+        sendOutSysex(group,sysex,5,3);
+        return;
+    }
+    sysex[5]=outputPathId;
+
+    if(ciType==MIDICI_DISCOVERY){
+        sendOutSysex(group,sysex,6,3);
+    }else{
+        sysex[6]=fbIdx;
+        sendOutSysex(group,sysex,7,3);
+    }
+
+}
+
+void midi2Processor::sendDiscoveryRequest(uint8_t group, uint32_t srcMUID,
+                                          std::array<uint8_t, 3> manuId, std::array<uint8_t, 2> familyId,
+                                          std::array<uint8_t, 2> modelId, std::array<uint8_t, 4> version,
+                                          uint8_t ciSupport, uint16_t sysExMax,
+                                          uint8_t outputPathId
+                                          //uint8_t productInstanceIdLength, uint8_t* productInstanceId
+) {
+    sendDiscovery(MIDICI_DISCOVERY, group, srcMUID, M2_CI_BROADCAST,
+            manuId, familyId,
+            modelId, version,
+            ciSupport, sysExMax,
+            outputPathId,
+            0
+            //productInstanceIdLength,
+            //productInstanceId
+    );
 }
 
 void midi2Processor::sendDiscoveryReply(uint8_t group,  uint32_t srcMUID, uint32_t destMuid,
-                                          uint8_t* sysexId, uint8_t* famId,
-                                          uint8_t* modelId, uint8_t* ver,
-                                          uint8_t ciSupport, uint16_t sysExMax
-){
-    if(sendOutSysex == nullptr) return;
+                                        std::array<uint8_t, 3> manuId, std::array<uint8_t, 2> familyId,
+                                        std::array<uint8_t, 2> modelId, std::array<uint8_t, 4> version,
+                                          uint8_t ciSupport, uint16_t sysExMax,
+                                        uint8_t outputPathId,
+                                        uint8_t fbIdx
 
-    uint8_t sysex[13];
+                                        //uint8_t productInstanceIdLength, uint8_t* productInstanceId
+){
+    sendDiscovery(MIDICI_DISCOVERYREPLY, group, srcMUID, destMuid,
+                  manuId, familyId,
+                  modelId, version,
+                  ciSupport, sysExMax,
+                  outputPathId,
+                  fbIdx
+                  //productInstanceIdLength, productInstanceId
+    );
+}
+
+void midi2Processor::sendEndpointInfoRequest(uint8_t group, uint32_t srcMUID, uint32_t destMuid, uint8_t status) {
+
+    if(midiCIVer<2 || sendOutSysex == nullptr) return;
+    uint8_t sysex[14];
     MIDICI midiCiHeader;
-    midiCiHeader.ciType = MIDICI_DISCOVERYREPLY;
+    midiCiHeader.ciType = MIDICI_ENDPOINTINFO;
+    midiCiHeader.ciVer = midiCIVer;
     midiCiHeader.localMUID = srcMUID;
     midiCiHeader.remoteMUID = destMuid;
     createCIHeader(sysex, midiCiHeader);
-
-    sendOutSysex(group,sysex,13,1);
-    sendOutSysex(group,sysexId,3,2);
-    sendOutSysex(group,famId,2,2);
-    sendOutSysex(group,modelId,2,2);
-    sendOutSysex(group,ver,4,2);
-
-    //Capabilities
-    sysex[0]=ciSupport;
-    setBytesFromNumbers(sysex, sysExMax, 1, 4);
-    sendOutSysex(group,sysex,5,3);
+    sysex[13] = status;
+    sendOutSysex(group,sysex,14,0);
 }
 
-void midi2Processor::sendNAK(uint8_t group, uint32_t srcMUID, uint32_t destMuid){
+void midi2Processor::sendEndpointInfoReply(uint8_t group, uint32_t srcMUID, uint32_t destMuid, uint8_t status,
+                                           uint16_t infoLength, uint8_t* infoData) {
+    if(midiCIVer<2 || sendOutSysex == nullptr) return;
+    uint8_t sysex[16];
+    MIDICI midiCiHeader;
+    midiCiHeader.ciType = MIDICI_ENDPOINTINFO_REPLY;
+    midiCiHeader.ciVer = midiCIVer;
+    midiCiHeader.localMUID = srcMUID;
+    midiCiHeader.remoteMUID = destMuid;
+    createCIHeader(sysex, midiCiHeader);
+    sysex[13] = status;
+    setBytesFromNumbers(sysex, infoLength, 14, 2);
+    sendOutSysex(group,sysex,16,1);
+    sendOutSysex(group,infoData,infoLength,3);
+}
+
+void midi2Processor::sendACKNAK(uint8_t ciType, uint8_t group, uint32_t srcMUID, uint32_t destMuid,
+                                uint8_t originalSubId, uint8_t statusCode,
+                             uint8_t statusData, uint8_t* ackNakDetails, uint16_t messageLength,
+                             uint8_t* ackNakMessage){
 	if(sendOutSysex == nullptr) return;
 	uint8_t sysex[13];
     MIDICI midiCiHeader;
-    midiCiHeader.ciType = MIDICI_NAK;
+    midiCiHeader.ciType = ciType;
+    midiCiHeader.ciVer = midiCIVer;
     midiCiHeader.localMUID = srcMUID;
     midiCiHeader.remoteMUID = destMuid;
     createCIHeader(sysex, midiCiHeader);
-	sendOutSysex(group,sysex,13,0);
+    if(midiCIVer<2){
+        sendOutSysex(group,sysex,13,0);
+        return;
+    }
+    sendOutSysex(group,sysex,13,1);
+    sysex[0]=originalSubId;
+    sysex[1]=statusCode;
+    sysex[2]=statusData;
+    sendOutSysex(group,sysex,3,2);
+    sendOutSysex(group,ackNakDetails,5,2);
+    setBytesFromNumbers(sysex, messageLength, 0, 2);
+    sendOutSysex(group,sysex,2,2);
+    sendOutSysex(group,ackNakMessage,messageLength,3);
 }
+
+void midi2Processor::sendACK(uint8_t group, uint32_t srcMUID, uint32_t destMuid, uint8_t originalSubId, uint8_t statusCode,
+                                uint8_t statusData, uint8_t* ackNakDetails, uint16_t messageLength,
+                                uint8_t* ackNakMessage) {
+
+    sendACKNAK(MIDICI_ACK, group, srcMUID, destMuid, originalSubId, statusCode, statusData, ackNakDetails,
+               messageLength, ackNakMessage);
+
+}
+
+void midi2Processor::sendNAK(uint8_t group, uint32_t srcMUID, uint32_t destMuid, uint8_t originalSubId, uint8_t statusCode,
+                             uint8_t statusData, uint8_t* ackNakDetails, uint16_t messageLength,
+                             uint8_t* ackNakMessage) {
+
+    sendACKNAK(MIDICI_NAK, group, srcMUID, destMuid, originalSubId, statusCode, statusData, ackNakDetails,
+               messageLength, ackNakMessage);
+
+}
+
 
 void midi2Processor::sendInvalidateMUID(uint8_t group, uint32_t srcMUID, uint32_t terminateMuid){
 	if(sendOutSysex == nullptr) return;
 	uint8_t sysex[13];
     MIDICI midiCiHeader;
     midiCiHeader.ciType = MIDICI_INVALIDATEMUID;
+    midiCiHeader.ciVer = midiCIVer;
     midiCiHeader.localMUID = srcMUID;
     createCIHeader(sysex, midiCiHeader);
 	sendOutSysex(group,sysex,13,1);

@@ -7,8 +7,8 @@
 
 void midi2Processor::processProfileSysex(uint8_t group, uint8_t s7Byte){
 	switch (midici[group].ciType){
-		case MIDICI_PROFILE_INQUIRY: //Profile Inquiry	
-			if (syExMessInt[group].pos == 12 && recvProfileInquiry != nullptr){
+		case MIDICI_PROFILE_INQUIRY: //Profile Inquiry
+        	if (syExMessInt[group].pos == 12 && recvProfileInquiry != nullptr){
 				recvProfileInquiry(group, midici[group]);
 			}
 			break;
@@ -31,10 +31,10 @@ void midi2Processor::processProfileSysex(uint8_t group, uint8_t s7Byte){
                 uint8_t pos = (syExMessInt[group].pos - 13) % 5;
                 syExMessInt[group].buffer1[pos] = s7Byte;
                 if (pos == 4 && recvSetProfileEnabled != nullptr) {
-                    uint8_t profile[5] = {syExMessInt[group].buffer1[0], syExMessInt[group].buffer1[1],
-                                          syExMessInt[group].buffer1[2], syExMessInt[group].buffer1[3],
-                                          syExMessInt[group].buffer1[4]};
-                    recvSetProfileEnabled(group, midici[group], profile);
+
+                    recvSetProfileEnabled(group, midici[group], {syExMessInt[group].buffer1[0], syExMessInt[group].buffer1[1],
+                                                                 syExMessInt[group].buffer1[2], syExMessInt[group].buffer1[3],
+                                                                 syExMessInt[group].buffer1[4]},0);
                 }
             }
 
@@ -43,50 +43,114 @@ void midi2Processor::processProfileSysex(uint8_t group, uint8_t s7Byte){
                 uint8_t pos = (syExMessInt[group].pos - 13) % 5;
                 syExMessInt[group].buffer1[pos] = s7Byte;
                 if (pos == 4 && recvSetProfileDisabled != nullptr) {
-                    uint8_t profile[5] = {syExMessInt[group].buffer1[0], syExMessInt[group].buffer1[1],
-                                          syExMessInt[group].buffer1[2], syExMessInt[group].buffer1[3],
-                                          syExMessInt[group].buffer1[4]};
-                    recvSetProfileDisabled(group, midici[group], profile);
+                    recvSetProfileDisabled(group, midici[group], {syExMessInt[group].buffer1[0], syExMessInt[group].buffer1[1],
+                                                                  syExMessInt[group].buffer1[2], syExMessInt[group].buffer1[3],
+                                                                  syExMessInt[group].buffer1[4]}
+                                                                  ,0);
                 }
             }
             break;
         }
-		case MIDICI_PROFILE_SETON: //Set Profile On Message
-			if(syExMessInt[group].pos >= 13 && syExMessInt[group].pos <= 17){
-				syExMessInt[group].buffer1[syExMessInt[group].pos-13] = s7Byte;
-			}
-			if (syExMessInt[group].pos == 17 && recvSetProfileOn != nullptr){
-				uint8_t profile[5] = {syExMessInt[group].buffer1[0], syExMessInt[group].buffer1[1], syExMessInt[group].buffer1[2], syExMessInt[group].buffer1[3], syExMessInt[group].buffer1[4]};
-				recvSetProfileOn(group,midici[group], profile);
-			}
-			break;
-		case MIDICI_PROFILE_SETOFF: //Set Profile Off Message
-			if(syExMessInt[group].pos >= 13 && syExMessInt[group].pos <= 17){
-				syExMessInt[group].buffer1[syExMessInt[group].pos-13] = s7Byte;
-			}
-			if (syExMessInt[group].pos == 17 && recvSetProfileOff != nullptr){
-				uint8_t profile[5] = {syExMessInt[group].buffer1[0], syExMessInt[group].buffer1[1], syExMessInt[group].buffer1[2], syExMessInt[group].buffer1[3], syExMessInt[group].buffer1[4]};
-				recvSetProfileOff(group,midici[group], profile);
-			}
-			break;	
-		case MIDICI_PROFILE_ENABLED: //Set Profile Enabled Message
-			if(syExMessInt[group].pos >= 13 && syExMessInt[group].pos <= 17){
-				syExMessInt[group].buffer1[syExMessInt[group].pos-13] = s7Byte;
-			}
-			if (syExMessInt[group].pos == 17 && recvSetProfileEnabled != nullptr){
-				uint8_t profile[5] = {syExMessInt[group].buffer1[0], syExMessInt[group].buffer1[1], syExMessInt[group].buffer1[2], syExMessInt[group].buffer1[3], syExMessInt[group].buffer1[4]};
-				recvSetProfileEnabled(group,midici[group], profile);
-			}
-			break;  
-		case MIDICI_PROFILE_DISABLED: //Set Profile Diabled Message
-			if(syExMessInt[group].pos >= 13 && syExMessInt[group].pos <= 17){
-				syExMessInt[group].buffer1[syExMessInt[group].pos-13] = s7Byte;
-			}
-			if (syExMessInt[group].pos == 17 && recvSetProfileDisabled != nullptr){
-				uint8_t profile[5] = {syExMessInt[group].buffer1[0], syExMessInt[group].buffer1[1], syExMessInt[group].buffer1[2], syExMessInt[group].buffer1[3], syExMessInt[group].buffer1[4]};
-				recvSetProfileDisabled(group,midici[group], profile);
-			}
-			break;
+
+        case MIDICI_PROFILE_ADD:
+        case MIDICI_PROFILE_REMOVE:
+        case MIDICI_PROFILE_ENABLED:
+        case MIDICI_PROFILE_DISABLED:
+        case MIDICI_PROFILE_SETOFF:
+		case MIDICI_PROFILE_SETON: { //Set Profile On Message
+            bool complete = false;
+            if (syExMessInt[group].pos >= 13 && syExMessInt[group].pos <= 17) {
+                syExMessInt[group].buffer1[syExMessInt[group].pos - 13] = s7Byte;
+            }
+            if (syExMessInt[group].pos == 17 &&
+                    (midici[group].ciVer == 1 || midici[group].ciType==MIDICI_PROFILE_ADD || midici[group].ciType==MIDICI_PROFILE_REMOVE)
+            ){
+                complete = true;
+            }
+            if(midici[group].ciVer > 1 && (syExMessInt[group].pos == 18 || syExMessInt[group].pos == 19)){
+                syExMessInt[group].intbuffer1[0] += s7Byte << (7 * (syExMessInt[group].pos - 18 ));
+            }
+            if (syExMessInt[group].pos == 19 && midici[group].ciVer > 1){
+                complete = true;
+            }
+
+            if(complete){
+                if (midici[group].ciType == MIDICI_PROFILE_ADD && recvSetProfileDisabled != nullptr)
+                    recvSetProfileDisabled(group, midici[group], {syExMessInt[group].buffer1[0], syExMessInt[group].buffer1[1],
+                                                            syExMessInt[group].buffer1[2], syExMessInt[group].buffer1[3],
+                                                            syExMessInt[group].buffer1[4]}, 0);
+
+                if (midici[group].ciType == MIDICI_PROFILE_REMOVE && recvSetProfileRemoved != nullptr)
+                    recvSetProfileRemoved(group, midici[group], {syExMessInt[group].buffer1[0], syExMessInt[group].buffer1[1],
+                                                                  syExMessInt[group].buffer1[2], syExMessInt[group].buffer1[3],
+                                                                  syExMessInt[group].buffer1[4]});
+
+                if (midici[group].ciType == MIDICI_PROFILE_SETON && recvSetProfileOn != nullptr)
+                    recvSetProfileOn(group, midici[group], {syExMessInt[group].buffer1[0], syExMessInt[group].buffer1[1],
+                                                            syExMessInt[group].buffer1[2], syExMessInt[group].buffer1[3],
+                                                            syExMessInt[group].buffer1[4]}, (uint8_t)syExMessInt[group].intbuffer1[0]);
+
+                if (midici[group].ciType == MIDICI_PROFILE_SETOFF && recvSetProfileOff != nullptr)
+                    recvSetProfileOff(group, midici[group], {syExMessInt[group].buffer1[0], syExMessInt[group].buffer1[1],
+                                                             syExMessInt[group].buffer1[2], syExMessInt[group].buffer1[3],
+                                                             syExMessInt[group].buffer1[4]});
+
+                if (midici[group].ciType == MIDICI_PROFILE_ENABLED && recvSetProfileEnabled != nullptr)
+                    recvSetProfileEnabled(group, midici[group], {syExMessInt[group].buffer1[0], syExMessInt[group].buffer1[1],
+                                                                 syExMessInt[group].buffer1[2], syExMessInt[group].buffer1[3],
+                                                                 syExMessInt[group].buffer1[4]}, (uint8_t)syExMessInt[group].intbuffer1[0]);
+
+                if (midici[group].ciType == MIDICI_PROFILE_DISABLED && recvSetProfileDisabled != nullptr)
+                    recvSetProfileDisabled(group, midici[group], {syExMessInt[group].buffer1[0], syExMessInt[group].buffer1[1],
+                                                                  syExMessInt[group].buffer1[2], syExMessInt[group].buffer1[3],
+                                                                  syExMessInt[group].buffer1[4]}, (uint8_t)syExMessInt[group].intbuffer1[0]);
+
+            }
+            break;
+        }
+
+        case MIDICI_PROFILE_DETAILS_INQUIRY:{
+            if (syExMessInt[group].pos >= 13 && syExMessInt[group].pos <= 17) {
+                syExMessInt[group].buffer1[syExMessInt[group].pos - 13] = s7Byte;
+            }
+            if (syExMessInt[group].pos == 19 && recvSetProfileDetailsInquiry != nullptr){ //Inquiry Target
+                recvSetProfileDetailsInquiry(group, midici[group], {syExMessInt[group].buffer1[0], syExMessInt[group].buffer1[1],
+                                                                    syExMessInt[group].buffer1[2], syExMessInt[group].buffer1[3],
+                                                                    syExMessInt[group].buffer1[4]}, s7Byte);
+            }
+
+            break;
+        }
+
+        case MIDICI_PROFILE_DETAILS_REPLY:{
+            if (syExMessInt[group].pos >= 13 && syExMessInt[group].pos <= 17) {
+                syExMessInt[group].buffer1[syExMessInt[group].pos - 13] = s7Byte;
+            }
+            if (syExMessInt[group].pos == 19){//Inquiry Target
+                syExMessInt[group].buffer1[5] = s7Byte;
+            }
+
+            if(syExMessInt[group].pos == 20 || syExMessInt[group].pos == 21){ //Inquiry Target Data length (dl)
+                syExMessInt[group].intbuffer1[0] += s7Byte << (7 * (syExMessInt[group].pos - 20 ));
+            }
+
+            if (syExMessInt[group].pos >= 22 && syExMessInt[group].pos <= 22 + syExMessInt[group].intbuffer1[0]){
+                syExMessInt[group].buffer1[syExMessInt[group].pos - 23 + 6] = s7Byte; //product ID
+            }
+
+            if (syExMessInt[group].pos == 22 + syExMessInt[group].intbuffer1[0] && recvSetProfileDetailsInquiry != nullptr){
+                recvSetProfileDetailsReply(group, midici[group], {syExMessInt[group].buffer1[0], syExMessInt[group].buffer1[1],
+                                                                  syExMessInt[group].buffer1[2], syExMessInt[group].buffer1[3],
+                                                                  syExMessInt[group].buffer1[4]},
+                                           syExMessInt[group].buffer1[5],
+                                           syExMessInt[group].intbuffer1[0],
+                                           &(syExMessInt[group].buffer1[6])
+                                           );
+            }
+
+            break;
+        }
+
         case MIDICI_PROFILE_SPECIFIC_DATA:
             //Profile
             if(syExMessInt[group].pos >= 13 && syExMessInt[group].pos <= 17){
@@ -116,9 +180,9 @@ void midi2Processor::processProfileSysex(uint8_t group, uint8_t s7Byte){
                    || syExMessInt[group].pos == 21 + dataLength
                    || dataLength == 0
                         ){
-                    uint8_t profile[5] = {syExMessInt[group].buffer1[0], syExMessInt[group].buffer1[1], syExMessInt[group].buffer1[2], syExMessInt[group].buffer1[3], syExMessInt[group].buffer1[4]};
-
-                    recvProfileDetails(group, midici[group], profile, charOffset+1, syExMessInt[group].buffer1, syExMessInt[group].intbuffer1[1], lastByteOfSet);
+                    recvProfileDetails(group, midici[group], {syExMessInt[group].buffer1[0], syExMessInt[group].buffer1[1],
+                                                              syExMessInt[group].buffer1[2], syExMessInt[group].buffer1[3],
+                                                              syExMessInt[group].buffer1[4]}, charOffset+1, syExMessInt[group].buffer1, syExMessInt[group].intbuffer1[1], lastByteOfSet);
                     syExMessInt[group].intbuffer1[1]++;
                 }
             }
@@ -138,6 +202,7 @@ void midi2Processor::sendProfileListRequest(uint8_t group, uint32_t srcMUID, uin
     midiCiHeader.localMUID = srcMUID;
     midiCiHeader.remoteMUID = destMuid;
     midiCiHeader.deviceId = destination;
+    midiCiHeader.ciVer = midiCIVer;
     createCIHeader(sysex, midiCiHeader);
 	sendOutSysex(group,sysex,13,0);
 }
@@ -151,6 +216,7 @@ void midi2Processor::sendProfileListResponse(uint8_t group, uint32_t srcMUID, ui
     midiCiHeader.localMUID = srcMUID;
     midiCiHeader.remoteMUID = destMuid;
     midiCiHeader.deviceId = destination;
+    midiCiHeader.ciVer = midiCIVer;
     createCIHeader(sysex, midiCiHeader);
 	sendOutSysex(group,sysex,13,1);
 	
@@ -164,38 +230,75 @@ void midi2Processor::sendProfileListResponse(uint8_t group, uint32_t srcMUID, ui
 }
 
 void midi2Processor::sendProfileMessage(uint8_t group, uint32_t srcMUID, uint32_t destMuid,  uint8_t destination,
-                                        uint8_t* profile, uint8_t ciType){
-    if(sendOutSysex == nullptr) return;
-    uint8_t sysex[13];
+                                        std::array<uint8_t, 5> profile,
+                                        uint8_t numberOfChannels, uint8_t ciType){
+	if(sendOutSysex == nullptr) return;
+	uint8_t sysex[13];
     MIDICI midiCiHeader;
     midiCiHeader.ciType = ciType;
     midiCiHeader.localMUID = srcMUID;
     midiCiHeader.remoteMUID = destMuid;
     midiCiHeader.deviceId = destination;
+    midiCiHeader.ciVer = midiCIVer;
     createCIHeader(sysex, midiCiHeader);
-    sendOutSysex(group,sysex,13,1);
-    sendOutSysex(group,profile,5,3);
+	sendOutSysex(group,sysex,13,1);
+    sysex[0] = profile[0];
+    sysex[1] = profile[1];
+    sysex[2] = profile[2];
+    sysex[3] = profile[3];
+    sysex[4] = profile[4];
+    if(midiCIVer==1 || ciType==MIDICI_PROFILE_ADD || ciType==MIDICI_PROFILE_REMOVE){
+        sendOutSysex(group,sysex,5,3);
+        return;
+    }
+    sendOutSysex(group,sysex,5,2);
+
+    setBytesFromNumbers(sysex, numberOfChannels, 0, 2);
+    sendOutSysex(group,sysex,2,3);
+
 }
 
-void midi2Processor::sendProfileOn(uint8_t group, uint32_t srcMUID, uint32_t destMuid, uint8_t destination, uint8_t* profile){
-    sendProfileMessage(group, srcMUID, destMuid, destination, profile, (uint8_t) MIDICI_PROFILE_SETON);
+void midi2Processor::sendProfileAdd(uint8_t group, uint32_t srcMUID, uint32_t destMuid, uint8_t destination,
+                                    std::array<uint8_t, 5> profile){
+    sendProfileMessage(group, srcMUID, destMuid, destination, profile, 0,
+                       (uint8_t) MIDICI_PROFILE_ADD);
 }
 
-void midi2Processor::sendProfileOff(uint8_t group, uint32_t srcMUID, uint32_t destMuid, uint8_t destination, uint8_t* profile){
-    sendProfileMessage(group, srcMUID, destMuid, destination, profile, (uint8_t) MIDICI_PROFILE_SETOFF);
+void midi2Processor::sendProfileRemove(uint8_t group, uint32_t srcMUID, uint32_t destMuid, uint8_t destination,
+                                    std::array<uint8_t, 5> profile){
+    sendProfileMessage(group, srcMUID, destMuid, destination, profile, 0,
+                       (uint8_t) MIDICI_PROFILE_REMOVE);
 }
 
-void midi2Processor::sendProfileEnabled(uint8_t group, uint32_t srcMUID, uint32_t destMuid, uint8_t destination, uint8_t* profile){
-    sendProfileMessage(group, srcMUID, destMuid, destination, profile, (uint8_t) MIDICI_PROFILE_ENABLED);
+void midi2Processor::sendProfileOn(uint8_t group, uint32_t srcMUID, uint32_t destMuid, uint8_t destination,
+                                   std::array<uint8_t, 5> profile, uint8_t numberOfChannels){
+    sendProfileMessage(group, srcMUID, destMuid, destination, profile, numberOfChannels,
+                       (uint8_t) MIDICI_PROFILE_SETON);
 }
 
-void midi2Processor::sendProfileDisabled(uint8_t group, uint32_t srcMUID, uint32_t destMuid, uint8_t destination, uint8_t* profile){
-    sendProfileMessage(group, srcMUID, destMuid, destination, profile, (uint8_t) MIDICI_PROFILE_DISABLED);
+void midi2Processor::sendProfileOff(uint8_t group, uint32_t srcMUID, uint32_t destMuid, uint8_t destination,
+                                    std::array<uint8_t, 5> profile){
+    sendProfileMessage(group, srcMUID, destMuid, destination, profile, 0,
+                       (uint8_t) MIDICI_PROFILE_SETOFF);
+}
+
+void midi2Processor::sendProfileEnabled(uint8_t group, uint32_t srcMUID, uint32_t destMuid, uint8_t destination,
+                                        std::array<uint8_t, 5> profile,
+                                        uint8_t numberOfChannels){
+    sendProfileMessage(group, srcMUID, destMuid, destination, profile, numberOfChannels,
+                       (uint8_t) MIDICI_PROFILE_ENABLED);
+}
+
+void midi2Processor::sendProfileDisabled(uint8_t group, uint32_t srcMUID, uint32_t destMuid, uint8_t destination,
+                                         std::array<uint8_t, 5> profile,
+                                         uint8_t numberOfChannels){
+    sendProfileMessage(group, srcMUID, destMuid, destination, profile, numberOfChannels,
+                       (uint8_t) MIDICI_PROFILE_DISABLED);
 }
 
 
 void midi2Processor::sendProfileSpecificData(uint8_t group, uint32_t srcMUID, uint32_t destMuid, uint8_t destination,
-                             uint8_t* profile, uint16_t datalen, uint8_t*  data){
+                                             std::array<uint8_t, 5> profile, uint16_t datalen, uint8_t*  data){
     if(sendOutSysex == nullptr) return;
     uint8_t sysex[13];
     MIDICI midiCiHeader;
@@ -203,10 +306,62 @@ void midi2Processor::sendProfileSpecificData(uint8_t group, uint32_t srcMUID, ui
     midiCiHeader.localMUID = srcMUID;
     midiCiHeader.remoteMUID = destMuid;
     midiCiHeader.deviceId = destination;
+    midiCiHeader.ciVer = midiCIVer;
     createCIHeader(sysex, midiCiHeader);
     sendOutSysex(group,sysex,13,1);
+    sysex[0] = profile[0];
+    sysex[1] = profile[1];
+    sysex[2] = profile[2];
+    sysex[3] = profile[3];
+    sysex[4] = profile[4];
+    sendOutSysex(group,sysex,5,2);
     setBytesFromNumbers(sysex, datalen, 0, 4);
     sendOutSysex(group,sysex,4,2);
+    sendOutSysex(group,data,datalen,3);
+}
+
+void midi2Processor::sendProfileDetailsInquiry(uint8_t group,  uint32_t srcMUID, uint32_t destMuid, uint8_t destination,
+                                               std::array<uint8_t, 5> profile, uint8_t InquiryTarget){
+    if(sendOutSysex == nullptr || midiCIVer < 2) return;
+    uint8_t sysex[13];
+    MIDICI midiCiHeader;
+    midiCiHeader.ciType = MIDICI_PROFILE_SPECIFIC_DATA;
+    midiCiHeader.localMUID = srcMUID;
+    midiCiHeader.remoteMUID = destMuid;
+    midiCiHeader.deviceId = destination;
+    midiCiHeader.ciVer = midiCIVer;
+    createCIHeader(sysex, midiCiHeader);
+    sendOutSysex(group,sysex,13,1);
+    sysex[0] = profile[0];
+    sysex[1] = profile[1];
+    sysex[2] = profile[2];
+    sysex[3] = profile[3];
+    sysex[4] = profile[4];
+    sysex[5] = InquiryTarget;
+    sendOutSysex(group,sysex,6,3);
+}
+
+void midi2Processor::sendProfileDetailsReply(uint8_t group,  uint32_t srcMUID, uint32_t destMuid, uint8_t destination,
+                                             std::array<uint8_t, 5> profile, uint8_t InquiryTarget, uint16_t datalen, uint8_t*  data){
+    if(sendOutSysex == nullptr || midiCIVer < 2) return;
+    uint8_t sysex[13];
+    MIDICI midiCiHeader;
+    midiCiHeader.ciType = MIDICI_PROFILE_SPECIFIC_DATA;
+    midiCiHeader.localMUID = srcMUID;
+    midiCiHeader.remoteMUID = destMuid;
+    midiCiHeader.deviceId = destination;
+    midiCiHeader.ciVer = midiCIVer;
+    createCIHeader(sysex, midiCiHeader);
+    sendOutSysex(group,sysex,13,1);
+    sysex[0] = profile[0];
+    sysex[1] = profile[1];
+    sysex[2] = profile[2];
+    sysex[3] = profile[3];
+    sysex[4] = profile[4];
+    sysex[5] = InquiryTarget;
+    sendOutSysex(group,sysex,6,2);
+    setBytesFromNumbers(sysex, datalen, 0, 2);
+    sendOutSysex(group,sysex,3,2);
     sendOutSysex(group,data,datalen,3);
 }
 

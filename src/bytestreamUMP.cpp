@@ -149,8 +149,7 @@ bool midiBsToUMP::availableUMP(){
 
 uint32_t midiBsToUMP::readUMP(){
 	uint32_t mess = umpMess[0];			
-	for(uint8_t i=0;i<messPos;i++)
-	{
+	for(uint8_t i=0;i<messPos;i++){
 		umpMess[i]=umpMess[i+1];
 	}
 	messPos--;			

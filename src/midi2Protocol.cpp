@@ -1,7 +1,6 @@
 #include "../include/midi2Protocol.h"
 #include "../include/midi2Processor.h"
-#include <cstdint>
-#ifndef M2_DISABLE_PROTOCOL
+#ifdef M2_ENABLE_PROTOCOL
 
 void midi2Processor::processProtocolSysex(uint8_t group, uint8_t s7Byte){
 	switch (midici[group].ciType){
@@ -27,6 +26,17 @@ void midi2Processor::processProtocolSysex(uint8_t group, uint8_t s7Byte){
                                           syExMessInt[group].buffer1[2], syExMessInt[group].buffer1[3],
                                           syExMessInt[group].buffer1[4]};
                     recvProtocolAvailable(group, midici[group], syExMessInt[group].intbuffer1[0], protocol);
+                }
+            }
+            if(midici[group].ciVer > 1){
+                if (syExMessInt[group].pos >= protocolOffset && syExMessInt[group].pos <= protocolOffset+5){
+                    syExMessInt[group].buffer1[syExMessInt[group].pos-protocolOffset] = s7Byte;
+                }
+                if (syExMessInt[group].pos == protocolOffset+5){
+                      uint8_t protocol[5] = {syExMessInt[group].buffer1[0], syExMessInt[group].buffer1[1],
+                                          syExMessInt[group].buffer1[2], syExMessInt[group].buffer1[3],
+                                          syExMessInt[group].buffer1[4]};
+                       if (recvProtocolAvailable != nullptr)recvSetProtocolConfirm(group, midici[group], syExMessInt[group].intbuffer1[0], protocol);
                 }
             }
             break;
@@ -81,17 +91,25 @@ void midi2Processor::processProtocolSysex(uint8_t group, uint8_t s7Byte){
 
 
 void midi2Processor::sendProtocolNegotiation(uint8_t group, uint32_t srcMUID, uint32_t destMuid,
-                                             uint8_t authorityLevel, uint8_t numProtocols, uint8_t* protocols ){
+                                             uint8_t authorityLevel, uint8_t numProtocols, uint8_t* protocols
+                                             , uint8_t* currentProtocol){
 	if(sendOutSysex == nullptr) return;
 	uint8_t sysex[14];
     MIDICI midiCiHeader;
     midiCiHeader.ciType = MIDICI_PROTOCOL_NEGOTIATION;
     midiCiHeader.localMUID = srcMUID;
     midiCiHeader.remoteMUID = destMuid;
+    midiCiHeader.ciVer = midiCIVer;
     createCIHeader(sysex, midiCiHeader);
     sysex[13] = authorityLevel;
     sendOutSysex(group,sysex,14,1);
-	sendOutSysex(group,protocols,numProtocols*5,3);
+    if(midiCIVer<2){
+        sendOutSysex(group,protocols,numProtocols*5,3);
+        return;
+    }
+    sendOutSysex(group,protocols,numProtocols*5,2);
+    sendOutSysex(group,currentProtocol,5,3);
+
 }
 
 void midi2Processor::sendProtocolNegotiationReply(uint8_t group, uint32_t srcMUID, uint32_t destMuid,
@@ -102,6 +120,7 @@ void midi2Processor::sendProtocolNegotiationReply(uint8_t group, uint32_t srcMUI
     midiCiHeader.ciType = MIDICI_PROTOCOL_NEGOTIATION_REPLY;
     midiCiHeader.localMUID = srcMUID;
     midiCiHeader.remoteMUID = destMuid;
+    midiCiHeader.ciVer = midiCIVer;
     createCIHeader(sysex, midiCiHeader);
     sysex[13] = authorityLevel;
     sendOutSysex(group,sysex,14,1);
@@ -117,6 +136,7 @@ void midi2Processor::sendSetProtocol(uint8_t group, uint32_t srcMUID, uint32_t d
     midiCiHeader.ciType = MIDICI_PROTOCOL_SET;
     midiCiHeader.localMUID = srcMUID;
     midiCiHeader.remoteMUID = destMuid;
+    midiCiHeader.ciVer = midiCIVer;
     createCIHeader(sysex, midiCiHeader);
     sysex[13] = authorityLevel;
     sendOutSysex(group,sysex,14,1);
@@ -130,6 +150,7 @@ void midi2Processor::sendProtocolTest(uint8_t group, uint32_t srcMUID, uint32_t 
     midiCiHeader.ciType = MIDICI_PROTOCOL_TEST;
     midiCiHeader.localMUID = srcMUID;
     midiCiHeader.remoteMUID = destMuid;
+    midiCiHeader.ciVer = midiCIVer;
     createCIHeader(sysex, midiCiHeader);
     sysex[13] = authorityLevel;
     sendOutSysex(group,sysex,14,1);
@@ -145,6 +166,7 @@ void midi2Processor::sendProtocolTestResponder(uint8_t group, uint32_t srcMUID, 
     midiCiHeader.ciType = MIDICI_PROTOCOL_TEST_RESPONDER;
     midiCiHeader.localMUID = srcMUID;
     midiCiHeader.remoteMUID = destMuid;
+    midiCiHeader.ciVer = midiCIVer;
     createCIHeader(sysex, midiCiHeader);
     sysex[13] = authorityLevel;
     sendOutSysex(group,sysex,14,1);
