@@ -46,7 +46,7 @@ class midiBsToUMP{
 		uint8_t rpnMsb[16];
 		uint8_t rpnLsb[16];
 	    	
-		void bytetreamToUMP(uint8_t b0, uint8_t b1, uint8_t b2);
+        void bytestreamToUMP(uint8_t b0, uint8_t b1, uint8_t b2);
 
 
 	public:

@@ -27,10 +27,10 @@ midiBsToUMP::midiBsToUMP(){
 	memset(bankLSB, 255, sizeof(bankLSB));
 	memset(rpnMsbValue, 255, sizeof(rpnMsbValue));
 	memset(rpnMsb, 255, sizeof(rpnMsb));
-	memset(rpnLsb, 255, sizeof(rpnLsb));
+    memset(rpnLsb, 255, sizeof(rpnLsb));
 }
 	 
-void midiBsToUMP::bytetreamToUMP(uint8_t b0, uint8_t b1, uint8_t b2){
+void midiBsToUMP::bytestreamToUMP(uint8_t b0, uint8_t b1, uint8_t b2){
   uint8_t status = b0 & 0xF0;
  
    if(d0 >= TIMING_CODE){
@@ -161,7 +161,7 @@ uint32_t midiBsToUMP::readUMP(){
 void midiBsToUMP::midi1BytestreamParse(uint8_t midi1Byte){
 		  
   if (midi1Byte == TUNEREQUEST || midi1Byte >=  TIMINGCLOCK) { 
-	  bytetreamToUMP(midi1Byte,0,0);
+      bytestreamToUMP(midi1Byte,0,0);
 	  return;
   }
   
@@ -172,8 +172,8 @@ void midiBsToUMP::midi1BytestreamParse(uint8_t midi1Byte){
 	if (midi1Byte == SYSEX_START){
 		sysex7State = 1;
 		sysex7Pos = 0;
-	}else
-	if (midi1Byte == SYSEX_STOP){
+    }else
+    if (midi1Byte == SYSEX_STOP){
 	  
 		umpMess[messPos] = ((UMP_SYSEX7 << 4) + defaultGroup + 0L) << 24;
 		umpMess[messPos] +=  ((sysex7State == 1?0:3) + 0L) << 20;
@@ -188,9 +188,9 @@ void midiBsToUMP::midi1BytestreamParse(uint8_t midi1Byte){
   if(sysex7State >= 1){
 	  //Check IF new UMP Message Type 3
 	  if(sysex7Pos%6 == 0 && sysex7Pos !=0){
-		 umpMess[messPos] = ((UMP_SYSEX7 << 4) + defaultGroup + 0L) << 24;
-		 umpMess[messPos] +=  (sysex7State + 0L) << 20;
-		 umpMess[messPos] +=  6L << 16;
+         umpMess[messPos] = ((UMP_SYSEX7 << 4) + defaultGroup + 0L) << 24;  // [mt=3] [group]
+         umpMess[messPos] +=  (sysex7State + 0L) << 20;                     // [status=1:start]
+         umpMess[messPos] +=  6L << 16;                                     // [length=6]
 		 umpMess[messPos++] += (sysex[0] << 8) + sysex[1];
 		 umpMess[messPos++] = ((sysex[2] + 0L) << 24) + ((sysex[3] + 0L)<< 16) + (sysex[4] << 8) + sysex[5] + 0L;
 		 memset(sysex, 0, sizeof(sysex));
@@ -202,7 +202,7 @@ void midiBsToUMP::midi1BytestreamParse(uint8_t midi1Byte){
 	  sysex7Pos++;
   } else
   if (d1 != 255) { // Second byte
-		bytetreamToUMP(d0, d1, midi1Byte);
+        bytestreamToUMP(d0, d1, midi1Byte);
 		d1 = 255;
   } else if (d0){ // status byte set
 	  if (
@@ -211,7 +211,7 @@ void midiBsToUMP::midi1BytestreamParse(uint8_t midi1Byte){
 		|| d0 == CHANNEL_PRESSURE
 		|| d0 == SONG_SELECT
 	  ) { 
-		  bytetreamToUMP(d0, midi1Byte, 0);
+          bytestreamToUMP(d0, midi1Byte, 0);
 		  return;
 	  } else 
 	  if (d0 < SYSEX_START || d0 == SPP) { // First data byte

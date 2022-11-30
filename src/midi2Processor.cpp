@@ -221,6 +221,12 @@ void midi2Processor::processSysEx(uint8_t group, uint8_t s7Byte){
 }
 
 void midi2Processor::processMIDICI(uint8_t group, uint8_t s7Byte){
+    qDebug() << "processMIDICI called - s7b: " << s7Byte;
+
+    if (s7Byte == 48)
+    {
+        qDebug() << "Property Exchange!!";
+    }
     //printf("s7 Byte %d\n", s7Byte);
 	if(syExMessInt[group].pos == 3){
 		midici[group].ciType =  s7Byte;
@@ -287,7 +293,7 @@ void midi2Processor::processMIDICI(uint8_t group, uint8_t s7Byte){
 
                 if (complete) {
                     //debug("  - Discovery Request 28 ");
-
+                    qDebug() << "processMIDICI called - complete";
                     if(midici[group].ciType==MIDICI_DISCOVERY) {
                         if (recvDiscoveryRequest != nullptr) recvDiscoveryRequest(
                                 group,
@@ -502,7 +508,9 @@ void midi2Processor::clearUMP(){
 }
 
 void midi2Processor::processUMP(uint32_t UMP){
-	umpMess[messPos] = UMP;
+    qDebug() << "processUMP called, ump: " << UMP << " messPos: " << messPos;
+
+    umpMess[messPos] = UMP;
 		
 	uint8_t mt = (umpMess[0] >> 28)  & 0xF;
 	uint8_t group = (umpMess[0] >> 24) & 0xF;
@@ -1012,7 +1020,7 @@ void midi2Processor::sendDiscoveryRequest(uint8_t group, uint32_t srcMUID,
 void midi2Processor::sendDiscoveryReply(uint8_t group,  uint32_t srcMUID, uint32_t destMuid,
                                         std::array<uint8_t, 3> manuId, std::array<uint8_t, 2> familyId,
                                         std::array<uint8_t, 2> modelId, std::array<uint8_t, 4> version,
-                                          uint8_t ciSupport, uint16_t sysExMax,
+                                        uint8_t ciSupport, uint16_t sysExMax,
                                         uint8_t outputPathId,
                                         uint8_t fbIdx
 

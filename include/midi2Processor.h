@@ -38,9 +38,6 @@ class midi2Processor{
     std::map<uint8_t,MIDICI> midici;
     std::map<uint8_t,umpSysex7Internal> syExMessInt;
 
-    // context pointer for the class that contains the callback function method
-    void (*callbackContext) = nullptr;
-
     // Message type 0x0  callbacks
     void (*recvJRClock)(/*uint8_t group, */uint16_t timing) = nullptr;
     void (*recvJRTimeStamp)(/*uint8_t group, */uint16_t timestamp) = nullptr;
@@ -109,12 +106,18 @@ class midi2Processor{
     void (*functionBlockName)(uint8_t fbIdx, uint8_t form, uint8_t nameLength, uint8_t* name) = nullptr;
 
     //MIDI-CI  callbacks
-    bool (*checkMUID)(uint8_t group, uint32_t muid) = nullptr;
-    void (*recvDiscoveryRequest)(uint8_t group, MIDICI ciDetails,
-                                 std::array<uint8_t, 3> manuId, std::array<uint8_t, 2> familyId,
-                                 std::array<uint8_t, 2> modelId, std::array<uint8_t, 4> version, uint8_t ciSupport,
-            uint16_t maxSysex, uint8_t outputPathId/*, uint8_t productInstanceIdLength,
-                                 uint8_t* productInstanceId*/) = nullptr;
+
+    // allow these callbacks to work with member functions
+    std::function<bool(uint8_t group, uint32_t muid)>
+                        checkMUID = nullptr;
+    std::function<void(uint8_t group, MIDICI ciDetails,
+                       std::array<uint8_t, 3> manuId, std::array<uint8_t, 2> familyId,
+                       std::array<uint8_t, 2> modelId, std::array<uint8_t, 4> version, uint8_t ciSupport,
+                       uint16_t maxSysex, uint8_t outputPathId
+                       /*, uint8_t productInstanceIdLength,
+                       uint8_t* productInstanceId*/
+                       )> recvDiscoveryRequest = nullptr;
+
     void (*recvDiscoveryReply)(uint8_t group, MIDICI ciDetails, std::array<uint8_t, 3> manuId, std::array<uint8_t, 2> familyId,
                                std::array<uint8_t, 2> modelId, std::array<uint8_t, 4> version, uint8_t ciSupport, uint16_t maxSysex,
             uint8_t outputPathId,
@@ -134,7 +137,10 @@ class midi2Processor{
 
     //other callbacks
     void (*recvUnknownSysEx)(uint8_t group, umpSysex7Internal * syExMess, uint8_t s7Byte) = nullptr;
-    void (*sendOutSysex)(uint8_t group, uint8_t *sysex ,uint16_t length, uint8_t state, void *methodContext) = nullptr;
+
+    // make this work with class member functions
+    std::function<void(uint8_t group, uint8_t *sysex ,uint16_t length, uint8_t state)>
+                        sendOutSysex = nullptr;
 
     //internal
     void endSysex7(uint8_t group);
@@ -187,9 +193,6 @@ class midi2Processor{
 
 
 	//-----------------------Handlers ---------------------------
-
-
-    inline void setCallbackContext(void (*cptr)){callbackContext = cptr;}
 
     inline void setJRClock(void (*fptr)(/*uint8_t group,*/ uint16_t timing)){ recvJRClock = fptr;}
     inline void setJRTimeStamp(void (*fptr)(/*uint8_t group,*/ uint16_t timestamp)){ recvJRTimeStamp = fptr;}
@@ -261,14 +264,24 @@ class midi2Processor{
     inline void setFunctionBlockNotify(void (*fptr)(uint8_t fbIdx, uint8_t form, uint8_t nameLength, uint8_t* name)){
         functionBlockName = fptr; }
 
-    inline void setCheckMUID(bool (*fptr)(uint8_t group, uint32_t muid)){ checkMUID = fptr; }
-    inline void setRawSysEx(void (*fptr)(uint8_t group, uint8_t *sysex ,uint16_t length, uint8_t state, void *methodContext)){
-        sendOutSysex = fptr; }
-	inline void setRecvDiscovery(void (*fptr)(uint8_t group, MIDICI ciDetails,std::array<uint8_t, 3> manuId, std::array<uint8_t, 2> familyId,
-                                              std::array<uint8_t, 2> modelId, std::array<uint8_t, 4> version, uint8_t ciSupport, uint16_t maxSysex,
-                                              uint8_t outputPathId
-                                              //, uint8_t productInstanceIdLength, uint8_t* productInstanceId
-                                              )){ recvDiscoveryRequest = fptr;}
+
+    // using std::function lets these work with class member functions
+    inline void setCheckMUID(std::function<bool(uint8_t group, uint32_t muid)> fptr){
+        checkMUID = fptr; }
+    inline void setRawSysEx(std::function<void(uint8_t group, uint8_t *sysex ,uint16_t length, uint8_t state)> fptr){
+        sendOutSysex = fptr; }    
+    inline void setRecvDiscovery(std::function<void(uint8_t group, MIDICI ciDetails,
+                                                    std::array<uint8_t, 3> manuId,
+                                                    std::array<uint8_t, 2> familyId,
+                                                    std::array<uint8_t, 2> modelId,
+                                                    std::array<uint8_t, 4> version,
+                                                    uint8_t ciSupport, uint16_t maxSysex,
+                                                    uint8_t outputPathId
+                                                    //, uint8_t productInstanceIdLength, uint8_t* productInstanceId
+                                                    )>  fptr){
+        recvDiscoveryRequest = fptr;}
+
+
     inline void setRecvDiscoveryReply(void (*fptr)(uint8_t group,
                                                    MIDICI ciDetails,
                                                    std::array<uint8_t, 3> manuId,
